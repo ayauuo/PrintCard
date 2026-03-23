@@ -59,6 +59,17 @@ video {
     z-index: 10;
   }
 
+  &.screen--carrier-input.active,
+  &.screen--carrier-preview.active {
+    display: flex !important;
+    z-index: 10;
+  }
+
+  &.screen--memory-game.active {
+    display: flex !important;
+    z-index: 10;
+  }
+
   &:not(.active) {
     pointer-events: none;
   }

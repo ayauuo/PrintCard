@@ -1,24 +1,23 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { usePhotobooth } from '@/composables/usePhotobooth'
-import { useLiveView } from '@/composables/useLiveView'
 import ScreenIdle from '@/components/photobooth/ScreenIdle.vue'
+import ScreenMemoryGame from '@/components/photobooth/ScreenMemoryGame.vue'
 import ScreenTemplate from '@/components/photobooth/ScreenTemplate.vue'
-import ScreenShoot from '@/components/photobooth/shoot/ScreenShoot.vue'
 import ScreenResult from '@/components/photobooth/ScreenResult.vue'
 import ScreenResultNoQr from '@/components/photobooth/ScreenResultNoQr.vue'
 import ScreenUploading from '@/components/photobooth/ScreenUploading.vue'
 import ScreenProcessing from '@/components/photobooth/ScreenProcessing.vue'
+import ScreenCarrierInput from '@/components/photobooth/ScreenCarrierInput.vue'
+import ScreenCarrierPreview from '@/components/photobooth/ScreenCarrierPreview.vue'
 import TestPanel from '@/components/photobooth/TestPanel.vue'
 import ScreenDbViewer from '@/components/photobooth/ScreenDbViewer.vue'
-import CameraTestPage from '@/components/photobooth/CameraTestPage.vue'
 import TestFilterPage from '@/components/testfillter/TestFilterPage.vue'
 import LoadingOverlay from '@/components/photobooth/LoadingOverlay.vue'
 import Footer from '@/components/photobooth/Footer.vue'
 
 const photobooth = usePhotobooth()
-const { currentScreen, showScreen, runDevStartPage, buildFinalOutput, selectTemplate, templates, callHost } = photobooth
-const { setHostLiveViewDataUrl, liveViewFrameCount } = useLiveView()
+const { currentScreen, showScreen, runDevStartPage, buildFinalOutput, selectTemplate, templates, setUnlockedTemplateIndices, callHost } = photobooth
 
 /** 紙鈔機／投幣器開關（來自 .env） */
 const isBillAcceptorEnabled = () => {
@@ -31,6 +30,18 @@ const isCoinAcceptorEnabled = () => {
 }
 /** 是否啟用任一收款方式；皆關閉時可點擊螢幕進入選版型 */
 const isPaymentsEnabled = () => isBillAcceptorEnabled() || isCoinAcceptorEnabled()
+
+/** 載具列印功能開關（來自 .env） */
+const isCarrierEnabled = () => {
+  const v = import.meta.env.VITE_CARRIER_ENABLED
+  return v === '1' || String(v ?? '1').toLowerCase() === 'true'
+}
+
+/** 翻牌記憶遊戲開關（來自 .env） */
+const isMemoryGameEnabled = () => {
+  const v = import.meta.env.VITE_MEMORY_GAME_ENABLED
+  return v === '1' || String(v ?? '1').toLowerCase() === 'true'
+}
 
 /** 已付金額累積：紙鈔只收 100 元；投幣器被動、可累積超過 100（例如 200），滿 100 扣一次進選版型，回到待機後餘額若仍 >= 100 再進選版型一次 */
 const paidAccumulated = ref(0)
@@ -61,16 +72,23 @@ async function runScheduledUploadWhenIdle() {
   }
 }
 
+function goToNextScreen() {
+  if (isMemoryGameEnabled()) {
+    showScreen('memory-game')
+  } else {
+    setUnlockedTemplateIndices([0, 1, 2, 3])
+    showScreen('template')
+  }
+}
+
 function tryGoToTemplateIfPaid() {
   if (currentScreen.value !== 'idle' || paidAccumulated.value < 100) return
   paidAccumulated.value -= 100
-  setTimeout(() => showScreen('template'), 1000)
+  setTimeout(goToNextScreen, 1000)
 }
 
 watch(currentScreen, (screen) => {
   if (screen === 'idle') {
-    const win = window as unknown as { chrome?: { webview?: unknown } }
-    if (win.chrome?.webview) callHost('stop_liveview', {}).catch(() => {})
     if (paidAccumulated.value >= 100) tryGoToTemplateIfPaid()
     runScheduledUploadWhenIdle()
   }
@@ -163,15 +181,6 @@ onMounted(() => {
           buildFinalOutput()
           return
         }
-        if (eventType === 'liveview_frame' && typeof msg.dataUrl === 'string') {
-          setHostLiveViewDataUrl(msg.dataUrl)
-          if (liveViewFrameCount.value === 1) {
-            console.log('[Live View] 第一幀已收到')
-          } else if (liveViewFrameCount.value % 100 === 0) {
-            console.log(`[Live View] 已收到 ${liveViewFrameCount.value} 幀`)
-          }
-          return
-        }
         const amount = typeof msg.amount === 'number' ? msg.amount : 0
         if (eventType !== 'paid' || amount <= 0) return
         paidAccumulated.value += amount
@@ -213,11 +222,7 @@ onUnmounted(() => {
     <ScreenIdle
       :class="{ active: currentScreen === 'idle' }"
       :is-payments-enabled="isPaymentsEnabled()"
-      @click-to-start="showScreen('template')"
-    />
-    <CameraTestPage
-      v-if="currentScreen === 'camera-test'"
-      @close="showScreen('idle')"
+      @click-to-start="goToNextScreen"
     />
     <TestFilterPage
       v-if="currentScreen === 'test-filter'"
@@ -230,15 +235,14 @@ onUnmounted(() => {
       @close="showScreen('idle')"
     />
     <TestPanel />
+    <ScreenMemoryGame v-if="isMemoryGameEnabled()" :class="{ active: currentScreen === 'memory-game' }" />
     <ScreenTemplate :class="{ active: currentScreen === 'template' }" />
-    <ScreenShoot
-      :class="{ active: currentScreen === 'shoot' }"
-      :is-active="currentScreen === 'shoot'"
-    />
     <ScreenResult :class="{ active: currentScreen === 'result' }" />
     <ScreenResultNoQr :class="{ active: currentScreen === 'result-no-qr' }" />
     <ScreenUploading :class="{ active: currentScreen === 'uploading' }" />
     <ScreenProcessing :class="{ active: currentScreen === 'processing' }" />
+    <ScreenCarrierInput v-if="isCarrierEnabled()" :class="{ active: currentScreen === 'carrier-input' }" />
+    <ScreenCarrierPreview v-if="isCarrierEnabled()" :class="{ active: currentScreen === 'carrier-preview' }" />
     <LoadingOverlay />
     <Footer />
   </div>

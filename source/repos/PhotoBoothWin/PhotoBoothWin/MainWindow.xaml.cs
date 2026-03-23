@@ -18,9 +18,6 @@ namespace PhotoBoothWin
         private RS232BillAcceptor? _billAcceptor;
         private ArduinoCoinAcceptor? _coinAcceptor;
         private bool _paymentsEnabled = true;
-        private DateTime _lastLiveViewPost = DateTime.MinValue;
-        private const int LiveViewThrottleMs = 100;
-        private int _liveViewFramesPushed;
 
         public MainWindow()
         {
@@ -79,10 +76,6 @@ namespace PhotoBoothWin
                 }
                 Web.CoreWebView2.SetVirtualHostNameToFolderMapping(
                     "photos", photosDir, CoreWebView2HostResourceAccessKind.Allow);
-
-                // EDSDK Live View 幀推送到 WebView（Vue 顯示在網頁上）
-                var cameraService = CameraServiceProvider.Current;
-                cameraService.LiveViewFrameReady += OnLiveViewFrameReady;
 
                 Web.CoreWebView2.WebMessageReceived += async (s, e) =>
                 {
@@ -157,10 +150,6 @@ namespace PhotoBoothWin
                 };
 
                 Web.Source = new Uri("https://app/index.html");
-
-                BoothBridge.OpenWpfShootRequested = () => Dispatcher.Invoke(ShowWpfShoot);
-                BoothBridge.ReturnToWebViewRequested = () => Dispatcher.Invoke(HideWpfShoot);
-                BoothBridge.ReturnToWebAndStartSynthesisRequested = () => Dispatcher.Invoke(ReturnToWebAndStartSynthesis);
 
                 // WebView 加載完成；紙鈔機／投幣器由 Vue 發送 payments_config 後依 .env 開關啟動
                 Web.CoreWebView2.DOMContentLoaded += (s, e) =>
@@ -606,101 +595,6 @@ namespace PhotoBoothWin
         }
         
 
-        private void OnLiveViewFrameReady(object? sender, System.Windows.Media.Imaging.BitmapSource frame)
-        {
-            if (!BoothBridge.LiveViewPushToWeb || frame == null)
-            {
-                if (!BoothBridge.LiveViewPushToWeb)
-                {
-                    var dropNow = DateTime.Now;
-                    if ((dropNow - _lastLiveViewPost).TotalSeconds > 2)
-                    {
-                        // #region agent log
-                        try
-                        {
-                            var logPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "GitHub", "photobooth-kiosk", ".cursor", "debug.log");
-                            var line = System.Text.Json.JsonSerializer.Serialize(new { location = "MainWindow.xaml.cs:OnLiveViewFrameReady", message = "frame_dropped_push_disabled", data = new { }, timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), sessionId = "debug-session", runId = "run1", hypothesisId = "H2" }) + "\n";
-                            System.IO.File.AppendAllText(logPath, line);
-                        }
-                        catch { }
-                        // #endregion
-                    }
-                }
-                return;
-            }
-            var now = DateTime.Now;
-            if ((now - _lastLiveViewPost).TotalMilliseconds < LiveViewThrottleMs) return;
-            // 若超過 2 秒沒推送過，視為新一輪 Live View，重設幀計數以便除錯日誌再印「第一幀」
-            if ((now - _lastLiveViewPost).TotalSeconds > 2)
-                _liveViewFramesPushed = 0;
-            _lastLiveViewPost = now;
-
-            Dispatcher.InvokeAsync(() =>
-            {
-                if (!BoothBridge.LiveViewPushToWeb) return;
-                try
-                {
-                    using var mem = new MemoryStream();
-                    var encoder = new JpegBitmapEncoder();
-                    encoder.Frames.Add(BitmapFrame.Create(frame));
-                    encoder.Save(mem);
-                    mem.Position = 0;
-                    var bytes = mem.ToArray();
-                    var base64 = Convert.ToBase64String(bytes);
-                    var dataUrl = "data:image/jpeg;base64," + base64;
-                    var json = JsonSerializer.Serialize(new { @event = "liveview_frame", dataUrl });
-                    Web.CoreWebView2?.PostWebMessageAsString(json);
-                    _liveViewFramesPushed++;
-                    if (_liveViewFramesPushed == 1)
-                        System.Diagnostics.Debug.WriteLine("[Live View] 第一幀已推送到 WebView。");
-                    else if (_liveViewFramesPushed % 60 == 0)
-                        System.Diagnostics.Debug.WriteLine($"[Live View] 已推送 {_liveViewFramesPushed} 幀到 WebView。");
-                }
-                catch
-                {
-                    // 單幀編碼失敗不影響後續
-                }
-            });
-        }
-
-        private void ShowWpfShoot()
-        {
-            BoothBridge.IsWpfShootEmbedded = true;
-            WebViewPanel.Visibility = Visibility.Collapsed;
-            WpfShootPanel.Visibility = Visibility.Visible;
-            WpfFrame.Navigate(new PhotoBoothWin.Pages.TemplatePage());
-        }
-
-        private void HideWpfShoot()
-        {
-            BoothBridge.IsWpfShootEmbedded = false;
-            WpfShootPanel.Visibility = Visibility.Collapsed;
-            WebViewPanel.Visibility = Visibility.Visible;
-        }
-
-        /// <summary>WPF 拍完四張並選濾鏡後按「下一步」：回到 WebView，通知 Vue 用 load_captures 取圖並執行合成/上傳/QR。</summary>
-        private void ReturnToWebAndStartSynthesis()
-        {
-            // #region agent log
-            try { var lp = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "GitHub", "photobooth-kiosk", ".cursor", "debug.log"); System.IO.File.AppendAllText(lp, System.Text.Json.JsonSerializer.Serialize(new { location = "MainWindow.ReturnToWebAndStartSynthesis:entry", message = "entry", timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), hypothesisId = "H5" }) + "\n"); } catch { }
-            // #endregion
-            var vueTemplateId = BoothBridge.GetVueTemplateIdForSynthesis();
-            WpfShootPanel.Visibility = Visibility.Collapsed;
-            WebViewPanel.Visibility = Visibility.Visible;
-            try
-            {
-                var msg = JsonSerializer.Serialize(new { @event = "wpf_shoot_done", templateId = vueTemplateId });
-                Web.CoreWebView2?.PostWebMessageAsString(msg);
-                // #region agent log
-                try { var lp = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "GitHub", "photobooth-kiosk", ".cursor", "debug.log"); System.IO.File.AppendAllText(lp, System.Text.Json.JsonSerializer.Serialize(new { location = "MainWindow.ReturnToWebAndStartSynthesis:after_post", message = "PostWebMessageAsString done", timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), hypothesisId = "H5" }) + "\n"); } catch { }
-                // #endregion
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[WPF] 通知 Vue 合成失敗: {ex.Message}");
-            }
-        }
-
         private void Grid_ContextMenuOpening(object sender, ContextMenuEventArgs e)
         {
             // 禁用右鍵選單
@@ -709,9 +603,6 @@ namespace PhotoBoothWin
 
         protected override void OnClosed(EventArgs e)
         {
-            BoothBridge.LiveViewPushToWeb = false;
-            _liveViewFramesPushed = 0;
-            CameraServiceProvider.Current.LiveViewFrameReady -= OnLiveViewFrameReady;
             _billAcceptor?.Dispose();
             _coinAcceptor?.Dispose();
             base.OnClosed(e);

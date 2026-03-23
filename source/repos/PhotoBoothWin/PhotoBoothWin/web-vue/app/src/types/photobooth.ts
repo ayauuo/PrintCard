@@ -46,6 +46,7 @@ export interface Template {
 
 export type ScreenName =
   | 'idle'
+  | 'memory-game'
   | 'template'
   | 'shoot'
   | 'result'
@@ -55,6 +56,8 @@ export type ScreenName =
   | 'camera-test'
   | 'test-filter'
   | 'db-view'
+  | 'carrier-input'
+  | 'carrier-preview'
 
 export type FilterId =
   | 'baby-pink'

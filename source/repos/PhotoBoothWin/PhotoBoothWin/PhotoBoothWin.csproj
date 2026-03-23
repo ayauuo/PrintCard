@@ -49,22 +49,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 原生 DLL 不包進單一 exe，改放在 exe 旁，否則 DllImport 無法載入 -->
-    <None Include="..\..\..\..\EDSDK_64\Dll\EDSDK.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-      <Link>EDSDK.dll</Link>
-    </None>
-    <None Include="..\..\..\..\EDSDK_64\Dll\EdsImage.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-      <Link>EdsImage.dll</Link>
-    </None>
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="AWSSDK.S3" Version="4.0.19.1" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3650.58" />

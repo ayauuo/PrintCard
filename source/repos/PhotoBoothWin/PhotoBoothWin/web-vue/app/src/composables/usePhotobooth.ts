@@ -113,7 +113,15 @@ const isTestSession = ref(false)
 /** 使用者在濾鏡畫面擺放的貼圖，依「格」分開（key = 格索引 0-based） */
 const stickersBySlot = ref<Record<number, StickerInstance[]>>({})
 const nextStickerId = ref(1)
+/** 記憶遊戲解鎖的版型索引（0=bk01, 1=bk02...）。null 表示顯示全部（如測試面板） */
+const unlockedTemplateIndices = ref<number[] | null>(null)
 const templates = computed(() => TEMPLATES)
+/** 選版型頁面顯示的版型：若有解鎖列表則只顯示解鎖的，否則顯示全部 */
+const availableTemplates = computed(() => {
+  const unlocked = unlockedTemplateIndices.value
+  if (unlocked == null || unlocked.length === 0) return TEMPLATES
+  return TEMPLATES.filter((_, i) => unlocked.includes(i))
+})
 
 /** 結果畫面要顯示的圖：有合成圖用合成圖，否則依 env 顯示版型占位圖（左側大圖） */
 const resultDisplayUrl = computed(() => {
@@ -207,6 +215,7 @@ export function usePhotobooth() {
     }
     if (name === 'idle') {
       resetSession()
+      unlockedTemplateIndices.value = null
       notifyBillAcceptorState(true)
     }
     currentScreen.value = name
@@ -239,6 +248,10 @@ export function usePhotobooth() {
 
   function selectTemplate(t: Template | null) {
     selectedTemplate.value = t
+  }
+
+  function setUnlockedTemplateIndices(indices: number[] | null) {
+    unlockedTemplateIndices.value = indices
   }
 
   function setCaptureResults(urls: string[]) {
@@ -615,11 +628,6 @@ export function usePhotobooth() {
   }
 
   function runDevStartPage() {
-    const filterDirect = String(import.meta.env.VITE_TEST_FILTER_DIRECT ?? '').trim()
-    if (filterDirect === '1' || filterDirect.toLowerCase() === 'true') {
-      showScreen('shoot')
-      return
-    }
     const raw = import.meta.env.VITE_DEV_START_PAGE
     const n = raw !== undefined && raw !== '' ? parseInt(raw, 10) : null
     if (n == null || n < 0 || n > 4) return
@@ -646,6 +654,8 @@ export function usePhotobooth() {
     autoPrint,
     isTestSession,
     templates,
+    availableTemplates,
+    setUnlockedTemplateIndices,
     setLoading,
     showScreen,
     getDefaultTemplateIndex,

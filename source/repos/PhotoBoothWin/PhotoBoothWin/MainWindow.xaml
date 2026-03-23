@@ -8,16 +8,10 @@
         WindowState="Maximized"
         Topmost="True">
     <Grid ContextMenuOpening="Grid_ContextMenuOpening">
-        <!-- Vue 網頁（預設顯示） -->
+        <!-- Vue 網頁 -->
         <Viewbox x:Name="WebViewPanel" Stretch="Fill" Visibility="Visible">
             <Border Width="1920" Height="1080">
                 <wv2:WebView2 x:Name="Web"/>
-            </Border>
-        </Viewbox>
-        <!-- WPF 拍照流程：10 秒倒數 + EDSDK 拍照（Vue 呼叫 open_wpf_shoot 時顯示） -->
-        <Viewbox x:Name="WpfShootPanel" Stretch="Fill" Visibility="Collapsed">
-            <Border Width="1920" Height="1080">
-                <Frame x:Name="WpfFrame" NavigationUIVisibility="Hidden"/>
             </Border>
         </Viewbox>
     </Grid>

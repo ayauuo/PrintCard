@@ -16,8 +16,10 @@
     "format": "prettier --write --experimental-cli src/"
   },
   "dependencies": {
+    "jsbarcode": "^3.12.3",
     "pinia": "^3.0.4",
     "qrcode": "^1.5.4",
+    "simple-keyboard": "^3.8.122",
     "vue": "^3.5.27",
     "vue-router": "^4.6.4"
   },

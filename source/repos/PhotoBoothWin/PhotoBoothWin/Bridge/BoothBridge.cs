@@ -20,27 +20,6 @@ namespace PhotoBoothWin.Bridge
 {
     public class BoothBridge
     {
-        /// <summary>Vue 呼叫 start_liveview 後為 true，MainWindow 會把 EDSDK Live View 幀推送到 WebView。</summary>
-        public static bool LiveViewPushToWeb { get; set; }
-        private static int _pendingStartLiveView;
-
-        /// <summary>Vue 呼叫 open_wpf_shoot 時由 MainWindow 設定，用來切換到 WPF 拍照頁（10 秒倒數 + EDSDK）。</summary>
-        public static Action? OpenWpfShootRequested { get; set; }
-        /// <summary>WPF 拍照流程中「返回主畫面」時由 MainWindow 設定。</summary>
-        public static Action? ReturnToWebViewRequested { get; set; }
-        /// <summary>目前是否從 Vue 切換過來的 WPF 拍照流程（返回時回 Vue）。</summary>
-        public static bool IsWpfShootEmbedded { get; set; }
-
-        /// <summary>WPF 拍照流程中「下一步」在濾鏡模式按下時，由 MainWindow 設定：回到 WebView 並觸發 Vue 合成（load_captures → save_image/upload_file）。</summary>
-        public static Action? ReturnToWebAndStartSynthesisRequested { get; set; }
-
-        /// <summary>將 WPF 版型代碼（A/B/C）對應為 Vue 版型 id（bk01/bk02/bk03），供合成時使用。</summary>
-        public static string GetVueTemplateIdForSynthesis()
-        {
-            var wpfId = PhotoBoothWin.BoothStore.Current.TemplateId ?? "";
-            return wpfId switch { "A" => "bk01", "B" => "bk02", "C" => "bk03", _ => "bk01" };
-        }
-
         private static readonly HttpClient _http = new HttpClient()
         {
             Timeout = TimeSpan.FromSeconds(120), // 大圖上傳較久，避免逾時中斷
@@ -76,6 +55,24 @@ namespace PhotoBoothWin.Bridge
             {
                 switch (req.cmd)
                 {
+                    case "print_hiti_carrier":
+                        {
+                            var dataUrl = req.data.TryGetProperty("dataUrl", out var du) ? du.GetString() ?? "" : "";
+                            System.Diagnostics.Debug.WriteLine($"[載具列印] 收到 print_hiti_carrier RPC, dataUrl 長度: {dataUrl?.Length ?? 0}");
+                            if (string.IsNullOrWhiteSpace(dataUrl))
+                            {
+                                return RespFail(req.id, "dataUrl 為空");
+                            }
+                            var err = HitiPrinter.PrintCarrierImage(dataUrl);
+                            if (err != null)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"[載具列印] HitiPrinter 失敗: {err}");
+                                return RespFail(req.id, err);
+                            }
+                            System.Diagnostics.Debug.WriteLine("[載具列印] 列印指令已送出");
+                            return Ok(req.id, new { });
+                        }
+
                     case "print_hotfolder":
                         {
                             var sizeKey = req.data.GetProperty("sizeKey").GetString() ?? "4x6";
@@ -235,10 +232,7 @@ namespace PhotoBoothWin.Bridge
                         }
 
                     case "clear_captures":
-                        {
-                            CameraCaptureStore.Clear();
-                            return Ok(req.id, new { });
-                        }
+                        return Ok(req.id, new { });
 
                     case "clear_photo_detail_db":
                         {
@@ -265,107 +259,18 @@ namespace PhotoBoothWin.Bridge
                         return Ok(req.id, new { inserted = 0 });
 
                     case "load_captures":
-                        {
-                            // #region agent log
-                            var logPath = @"c:\Users\user\Documents\GitHub\photobooth-kiosk\.cursor\debug.log";
-                            System.Diagnostics.Debug.WriteLine("[Bridge] 收到 load_captures 請求...");
-                            try { File.AppendAllText(logPath, System.Text.Json.JsonSerializer.Serialize(new { location = "BoothBridge.load_captures:entry", message = "load_captures started", data = new { outDir = CaptureOutputDirectory }, timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), hypothesisId = "H2" }) + "\n"); } catch { }
-                            // #endregion
-                            var urls = await Task.Run(() =>
-                            {
-                                // #region agent log
-                                System.Diagnostics.Debug.WriteLine("[Bridge] 開始背景讀圖...");
-                                try { File.AppendAllText(logPath, System.Text.Json.JsonSerializer.Serialize(new { location = "BoothBridge.load_captures:TaskRun_start", message = "inside Task.Run", timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), hypothesisId = "H2" }) + "\n"); } catch { }
-                                // #endregion
-                                var byIndex = CameraCaptureStore.GetCapturesByIndex();
-                                var result = new string[byIndex.Count];
-                                for (var i = 0; i < byIndex.Count; i++)
-                                {
-                                    var path = byIndex[i];
-                                    var thumbPath = string.IsNullOrWhiteSpace(path) ? "" : CreateThumbnailFile(path, 800) ?? "";
-                                    result[i] = string.IsNullOrEmpty(thumbPath) ? "" : $"https://photos/{Path.GetFileName(thumbPath)}";
-                                }
-                                // #region agent log
-                                System.Diagnostics.Debug.WriteLine($"[Bridge] 讀圖完成，共 {result.Length} 張");
-                                try { File.AppendAllText(logPath, System.Text.Json.JsonSerializer.Serialize(new { location = "BoothBridge.load_captures:TaskRun_done", message = "Task.Run completed", data = new { count = result.Length }, timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), hypothesisId = "H2" }) + "\n"); } catch { }
-                                // #endregion
-                                return result;
-                            }).ConfigureAwait(false);
-                            // #region agent log
-                            System.Diagnostics.Debug.WriteLine("[Bridge] 準備回傳前端...");
-                            try { File.AppendAllText(logPath, System.Text.Json.JsonSerializer.Serialize(new { location = "BoothBridge.load_captures:exit", message = "load_captures returning", timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), hypothesisId = "H2" }) + "\n"); } catch { }
-                            // #endregion
-                            return Ok(req.id, new { urls });
-                        }
+                        // 拍照功能已移除，一律回傳空陣列（Vue 改用測試圖）
+                        return Ok(req.id, new { urls = Array.Empty<string>() });
 
                     case "start_liveview":
-                        {
-                            System.Diagnostics.Debug.WriteLine("[Live View] start_liveview 收到，開始推送到 Web…");
-                            LiveViewPushToWeb = true;
-                            // #region agent log
-                            try
-                            {
-                                var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "GitHub", "photobooth-kiosk", ".cursor", "debug.log");
-                                var line = JsonSerializer.Serialize(new { location = "BoothBridge.cs:start_liveview", message = "liveview_push_enabled", data = new { LiveViewPushToWeb = LiveViewPushToWeb }, timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), sessionId = "debug-session", runId = "run1", hypothesisId = "H1" }) + "\n";
-                                File.AppendAllText(logPath, line);
-                            }
-                            catch { }
-                            // #endregion
-                            if (CameraServiceProvider.Current is Services.CanonEdsdkCameraService edsdk && edsdk.IsDownloading)
-                            {
-                                System.Diagnostics.Debug.WriteLine("[Live View] start_liveview 延後：下載中，暫不啟動 EDSDK Live View。");
-                                if (Interlocked.Exchange(ref _pendingStartLiveView, 1) == 0)
-                                {
-                                    _ = Task.Run(async () =>
-                                    {
-                                        try
-                                        {
-                                            while (CameraServiceProvider.Current is Services.CanonEdsdkCameraService svc && svc.IsDownloading)
-                                            {
-                                                await Task.Delay(100).ConfigureAwait(false);
-                                            }
-                                            await CameraServiceProvider.Current.InitializeAsync().ConfigureAwait(false);
-                                            await CameraServiceProvider.Current.StartLiveViewAsync().ConfigureAwait(false);
-                                            System.Diagnostics.Debug.WriteLine("[Live View] start_liveview 延後啟動完成（下載結束後重試）。");
-                                        }
-                                        finally
-                                        {
-                                            Interlocked.Exchange(ref _pendingStartLiveView, 0);
-                                        }
-                                    });
-                                }
-                                return Ok(req.id, new { deferred = true, reason = "downloading" });
-                            }
-                            await CameraServiceProvider.Current.InitializeAsync().ConfigureAwait(false);
-                            await CameraServiceProvider.Current.StartLiveViewAsync().ConfigureAwait(false);
-                            System.Diagnostics.Debug.WriteLine("[Live View] start_liveview 完成，已啟動 EDSDK Live View。");
-                            return Ok(req.id, new { });
-                        }
-
                     case "stop_liveview":
-                        {
-                            System.Diagnostics.Debug.WriteLine("[Live View] stop_liveview 收到，停止推送到 Web。");
-                            LiveViewPushToWeb = false;
-                            // #region agent log
-                            try
-                            {
-                                var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "GitHub", "photobooth-kiosk", ".cursor", "debug.log");
-                                var line = JsonSerializer.Serialize(new { location = "BoothBridge.cs:stop_liveview", message = "liveview_push_disabled", data = new { LiveViewPushToWeb = LiveViewPushToWeb }, timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), sessionId = "debug-session", runId = "run1", hypothesisId = "H1" }) + "\n";
-                                File.AppendAllText(logPath, line);
-                            }
-                            catch { }
-                            // #endregion
-                            await CameraServiceProvider.Current.StopLiveViewAsync().ConfigureAwait(false);
-                            return Ok(req.id, new { });
-                        }
-
                     case "half_press_shutter":
-                        {
-                            System.Diagnostics.Debug.WriteLine("[Shoot] half_press_shutter 收到，只半按快門對焦、不拍照。");
-                            await CameraServiceProvider.Current.InitializeAsync().ConfigureAwait(false);
-                            await CameraServiceProvider.Current.HalfPressShutterAsync().ConfigureAwait(false);
-                            return Ok(req.id, new { });
-                        }
+                    case "trigger_evf_af_with_pause":
+                    case "take_one_shot_edsdk":
+                    case "get_camera_status":
+                    case "open_wpf_shoot":
+                        // 拍照功能已移除，這些指令改為 no-op
+                        return Ok(req.id, new { });
 
                     case "play_countdown_audio":
                         {
@@ -388,103 +293,6 @@ namespace PhotoBoothWin.Bridge
                                 }
                             }
                             catch { }
-                            return Ok(req.id, new { });
-                        }
-
-                    case "trigger_evf_af_with_pause":
-                        {
-                            System.Diagnostics.Debug.WriteLine("[Shoot] trigger_evf_af_with_pause 收到，觸發 EVF 對焦。");
-                            await CameraServiceProvider.Current.InitializeAsync().ConfigureAwait(false);
-                            await CameraServiceProvider.Current.TriggerEvfAfWithPauseAsync().ConfigureAwait(false);
-                            return Ok(req.id, new { });
-                        }
-
-                    case "take_one_shot_edsdk":
-                        {
-                            // 1. 在 UI 執行緒解析參數 (快速)
-                            var index = 0;
-                            var shotCountProvided = req.data.TryGetProperty("shotCount", out var scEl) && scEl.ValueKind == System.Text.Json.JsonValueKind.Number;
-                            var shotCount = shotCountProvided ? Math.Max(1, scEl.GetInt32()) : 1;
-                            if (req.data.TryGetProperty("index", out var idxEl) && idxEl.ValueKind == System.Text.Json.JsonValueKind.Number)
-                                index = idxEl.GetInt32();
-                            // 連拍與補拍都在拍完後自動重啟 Live View，讓使用者立即看到預覽（是否關閉交由前端 stop_liveview 控制）
-                            var restartLiveViewAfter = true;
-                            var outDir = CaptureOutputDirectory;
-
-                            System.Diagnostics.Debug.WriteLine($"[Bridge] UI Thread={System.Threading.Thread.CurrentThread.ManagedThreadId} 開始處理 take_one_shot_edsdk index={index}");
-
-                            // 2. 將繁重工作包在 Task.Run 裡，await 結束後保證回到 UI 執行緒
-                            var resultData = await Task.Run(async () =>
-                            {
-                                System.Diagnostics.Debug.WriteLine($"[Bridge] Background Thread={System.Threading.Thread.CurrentThread.ManagedThreadId} 開始拍照");
-                                try { Directory.CreateDirectory(outDir); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[Shoot] 建立資料夾失敗 {outDir}: {ex.Message}"); }
-
-                                string path = "";
-                                try
-                                {
-                                    path = await CameraServiceProvider.Current.TakePictureAsync(outDir, index, restartLiveViewAfter);
-                                }
-                                catch (InvalidOperationException ex)
-                                {
-                                    System.Diagnostics.Debug.WriteLine($"[Shoot] take_one_shot_edsdk InvalidOperationException（不重試）：{ex.Message}");
-                                }
-                                catch (TimeoutException ex)
-                                {
-                                    System.Diagnostics.Debug.WriteLine($"[Shoot] take_one_shot_edsdk index={index} 逾時（不重試）：{ex.Message}");
-                                }
-                                catch (Exception ex)
-                                {
-                                    System.Diagnostics.Debug.WriteLine($"[Shoot] take_one_shot_edsdk 例外：{ex.GetType().Name} {ex.Message}");
-                                    throw;
-                                }
-
-                                if (!string.IsNullOrWhiteSpace(path))
-                                    CameraCaptureStore.SetCapture(index, path);
-                                System.Diagnostics.Debug.WriteLine($"[Shoot] index={index} 拍照完成，路徑：{path ?? "(空)"}");
-
-                                var fileName = !string.IsNullOrWhiteSpace(path) ? Path.GetFileName(path) : "";
-                                var photoUrl = !string.IsNullOrEmpty(fileName) ? $"https://photos/{fileName}" : "";
-                                string thumbUrl = "";
-                                try
-                                {
-                                    System.Diagnostics.Debug.WriteLine($"[Thumb] 開始處理: {path ?? "(空)"}");
-                                    await Task.Delay(100);
-                                    if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                                    {
-                                        var thumbPath = CreateThumbnailFile(path, 600);
-                                        if (!string.IsNullOrEmpty(thumbPath))
-                                            thumbUrl = $"https://photos/{Path.GetFileName(thumbPath)}";
-                                        System.Diagnostics.Debug.WriteLine($"[Thumb] 縮圖已存檔: {thumbPath ?? "(空)"}");
-                                    }
-                                    else
-                                    {
-                                        System.Diagnostics.Debug.WriteLine($"[Thumb Error] 找不到檔案: {path ?? "(空)"}");
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    System.Diagnostics.Debug.WriteLine($"[Thumb Error] 縮圖失敗: {ex.Message}");
-                                }
-
-                                return new { filePath = path ?? "", photoUrl, dataUrl = "", thumbUrl };
-                            });
-
-                            // 3. 已回到 UI 執行緒，安全回傳給 WebView2
-                            System.Diagnostics.Debug.WriteLine($"[Bridge] 回到 UI Thread={System.Threading.Thread.CurrentThread.ManagedThreadId}，準備回傳 thumbUrl={resultData.thumbUrl}");
-                            return Ok(req.id, resultData);
-                        }
-
-                    case "get_camera_status":
-                        {
-                            await CameraServiceProvider.Current.InitializeAsync().ConfigureAwait(false);
-                            var isConnected = CameraServiceProvider.Current.IsConnected;
-                            return Ok(req.id, new { isConnected });
-                        }
-
-                    case "open_wpf_shoot":
-                        {
-                            System.Diagnostics.Debug.WriteLine("[MainWindow] open_wpf_shoot 收到，切換到 WPF 拍照頁。");
-                            OpenWpfShootRequested?.Invoke();
                             return Ok(req.id, new { });
                         }
 

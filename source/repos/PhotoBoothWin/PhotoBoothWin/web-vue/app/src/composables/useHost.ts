@@ -74,6 +74,10 @@ export function callHost(cmd: string, data: Record<string, unknown> = {}): Promi
     if (cmd === 'get_print_records') return Promise.resolve({ rows: [] as unknown[], totalPrintSheets: 0, totalTestSheets: 0 })
     if (cmd === 'seed_fake_data') return Promise.resolve({ inserted: 0 })
     if (cmd === 'shutdown') return Promise.resolve({})
+    if (cmd === 'print_hiti_carrier') {
+      console.warn('[載具列印] 無 WebView，列印指令未送出。請在完整 WPF 程式中執行才能實際列印。')
+      return Promise.resolve({})
+    }
     return Promise.resolve({})
   }
   const chrome = (win as unknown as { chrome: { webview: { postMessage: (msg: string) => void; addEventListener: (type: string, handler: (ev: { data: string }) => void) => void; removeEventListener: (type: string, handler: (ev: { data: string }) => void) => void } } }).chrome

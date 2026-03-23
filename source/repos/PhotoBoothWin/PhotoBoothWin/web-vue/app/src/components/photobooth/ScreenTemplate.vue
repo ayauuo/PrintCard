@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { Template } from '@/types/photobooth'
 import { usePhotobooth } from '@/composables/usePhotobooth'
-import { unlockCountdownAudio } from '@/composables/useTakePicture'
 
-const { templates, selectedTemplate, selectTemplate, showScreen } = usePhotobooth()
+const { availableTemplates, selectedTemplate, selectTemplate, showScreen } = usePhotobooth()
 
 const msgboxVisible = ref(false)
 const templateListRef = ref<HTMLElement | null>(null)
@@ -19,13 +18,18 @@ function onCardClick(t: Template) {
 }
 
 function confirmTemplate() {
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/60461173-9774-483b-a750-822bb1590c42', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'ScreenTemplate.vue:confirmTemplate', message: 'confirmTemplate_called', data: { hasSelection: !!selectedTemplate.value }, timestamp: Date.now(), sessionId: 'debug-session', hypothesisId: 'H1' }) }).catch(() => {})
-  // #endregion
-  unlockCountdownAudio()
   msgboxVisible.value = false
-  // 立即切到拍照頁；若仍用 nextTick 導致未切換，改同步呼叫確保進入拍攝畫面
-  showScreen('shoot')
+  if (isCarrierEnabled()) {
+    // 進入載具輸入流程（鍵盤輸入 → 預覽版型 → HiTi 列印）
+    showScreen('carrier-input')
+  } else {
+    showScreen('idle')
+  }
+}
+
+function isCarrierEnabled() {
+  const v = import.meta.env.VITE_CARRIER_ENABLED
+  return v === '1' || String(v ?? '1').toLowerCase() === 'true'
 }
 
 function repeatChoose() {
@@ -35,8 +39,6 @@ function repeatChoose() {
 watch(selectedTemplate, (v) => {
   if (!v) msgboxVisible.value = false
 })
-
-// 相機改由 ScreenShoot.vue 進入拍照頁時才啟動，不在此預熱
 </script>
 
 <template>
@@ -57,7 +59,7 @@ watch(selectedTemplate, (v) => {
         :class="{ 'has-selection': hasSelection }"
       >
         <button
-          v-for="t in templates"
+          v-for="t in availableTemplates"
           :key="t.id"
           type="button"
           class="screen-template__card"

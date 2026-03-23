@@ -6,11 +6,13 @@ import { usePhotobooth } from '@/composables/usePhotobooth'
 const {
   showScreen,
   templates,
+  setUnlockedTemplateIndices,
   selectedTemplate,
   getDefaultTemplateIndex,
   selectTemplate,
   setResultMock,
   setCaptureResultsFromTestImages,
+  buildFinalOutput,
   setTestSession,
   resetSession,
   callHost,
@@ -21,6 +23,18 @@ const {
 const allowDevPanel = computed(() => {
   const v = import.meta.env.VITE_ALLOW_DEV_PANEL
   return v === '1' || String(v).toLowerCase() === 'true'
+})
+
+/** 載具列印功能是否啟用（來自 .env） */
+const isCarrierEnabled = computed(() => {
+  const v = import.meta.env.VITE_CARRIER_ENABLED
+  return v === '1' || String(v ?? '1').toLowerCase() === 'true'
+})
+
+/** 翻牌記憶遊戲是否啟用（來自 .env） */
+const isMemoryGameEnabled = computed(() => {
+  const v = import.meta.env.VITE_MEMORY_GAME_ENABLED
+  return v === '1' || String(v ?? '1').toLowerCase() === 'true'
 })
 
 const hidden = ref(true)
@@ -73,11 +87,14 @@ function onClearTestData() {
 }
 
 function goTo(id: ScreenName) {
-  if (id === 'shoot' && !selectedTemplate.value && templates.value.length > 0) {
-    selectTemplate(templates.value[getDefaultTemplateIndex()] ?? null)
+  if (id === 'template') {
+    setUnlockedTemplateIndices([0, 1, 2, 3])
+    if (templates.value.length > 0) {
+      selectTemplate(templates.value[getDefaultTemplateIndex()] ?? null)
+    }
   }
-  // 測試相關畫面：從測試面板進入時一律標記為測試流程（含 template，選版型後進拍照也會維持測試）
-  if (id === 'template' || id === 'shoot' || id === 'camera-test' || id === 'test-filter' || id === 'result' || id === 'result-no-qr' || id === 'uploading' || id === 'processing') {
+  // 測試相關畫面：從測試面板進入時一律標記為測試流程
+  if (id === 'template' || id === 'memory-game' || id === 'carrier-input' || id === 'carrier-preview' || id === 'test-filter' || id === 'result' || id === 'result-no-qr' || id === 'uploading' || id === 'processing') {
     setTestSession(true)
   }
   // #region agent log
@@ -88,20 +105,23 @@ function goTo(id: ScreenName) {
   showScreen(id)
 }
 
-async function goToShootWithPreview() {
+async function goToUploadingWithTestImages() {
   if (templates.value.length > 0) {
     selectTemplate(templates.value[getDefaultTemplateIndex()] ?? null)
   }
+  setTestSession(true)
   await setCaptureResultsFromTestImages()
-  showScreen('shoot')
+  showScreen('uploading')
+  buildFinalOutput()
 }
 
-function onQuickPrint() {
+async function onQuickPrint() {
   if (templates.value.length > 0) {
     selectTemplate(templates.value[getDefaultTemplateIndex()] ?? null)
-    // 「直接拍照並列印」視為測試流程
     setTestSession(true)
-    showScreen('shoot')
+    await setCaptureResultsFromTestImages()
+    showScreen('uploading')
+    buildFinalOutput()
   }
 }
 
@@ -165,23 +185,23 @@ onUnmounted(() => {
       <button type="button" class="btn primary" @click="goTo('idle')">
         測試：回待機畫面
       </button>
+      <button v-if="isMemoryGameEnabled" type="button" class="btn primary" @click="goTo('memory-game')">
+        測試：翻牌遊戲
+      </button>
       <button type="button" class="btn primary" @click="goTo('template')">
         測試：選版型畫面
       </button>
       <button type="button" class="btn primary" @click="goTo('db-view')">
         觀看資料庫
       </button>
-      <button type="button" class="btn primary" @click="goTo('camera-test')">
-        測試：相機測試頁（對焦／拍照）
+      <button v-if="isCarrierEnabled" type="button" class="btn primary" @click="goTo('carrier-input')">
+        測試：載具輸入
       </button>
       <button type="button" class="btn primary" @click="goTo('test-filter')">
         測試濾鏡
       </button>
-      <button type="button" class="btn primary" @click="goTo('shoot')">
-        測試：拍照畫面
-      </button>
-      <button type="button" class="btn primary" @click="goToShootWithPreview">
-        測試：拍照預覽畫面（測試圖）
+      <button type="button" class="btn primary" @click="goToUploadingWithTestImages">
+        測試：合成流程（測試圖）
       </button>
       <button
         type="button"
@@ -208,7 +228,7 @@ onUnmounted(() => {
         class="btn primary btn-quick-print"
         @click="onQuickPrint"
       >
-        直接拍照並列印
+        測試圖合成並列印
       </button>
       <button
         type="button"
