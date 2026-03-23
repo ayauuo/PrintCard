@@ -11,6 +11,10 @@
 *.sln.docstates
 *.env
 
+# 敏感設定檔（含 AWS 金鑰、上傳網址等）
+**/s3_config.txt
+**/upload_url.txt
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
