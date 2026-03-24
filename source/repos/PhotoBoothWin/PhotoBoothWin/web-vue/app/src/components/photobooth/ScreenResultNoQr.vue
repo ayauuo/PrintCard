@@ -1,7 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'ScreenResultNoQr' })
 
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
 import { usePhotobooth } from '@/composables/usePhotobooth'
 
 const {
@@ -14,6 +14,7 @@ const {
   resetSession,
   autoPrint,
   isTestSession,
+  immediatePrintAfterNextResult,
 } = usePhotobooth()
 
 const copies = ref(1)
@@ -131,10 +132,17 @@ function goToPrintingThenIdle() {
 }
 
 watch(
-  [() => currentScreen.value, () => finalFilePath.value],
+  [() => currentScreen.value, () => finalFilePath.value, () => immediatePrintAfterNextResult.value],
   ([screen, path]) => {
     clearAutoGoTimer()
     if (screen !== 'result-no-qr' || !path) return
+    if (immediatePrintAfterNextResult.value) {
+      immediatePrintAfterNextResult.value = false
+      void nextTick(() => {
+        goToPrintingThenIdle()
+      })
+      return
+    }
     const sec = getResultAutoPrintSec()
     autoGoTimer.value = setTimeout(() => {
       autoGoTimer.value = null

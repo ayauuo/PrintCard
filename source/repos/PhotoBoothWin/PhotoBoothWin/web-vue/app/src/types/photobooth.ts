@@ -47,7 +47,9 @@ export interface Template {
 export type ScreenName =
   | 'idle'
   | 'memory-game'
+  | 'found-game'
   | 'template'
+  | 'choose-character'
   | 'shoot'
   | 'result'
   | 'result-no-qr'

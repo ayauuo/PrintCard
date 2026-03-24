@@ -37,6 +37,18 @@ const isMemoryGameEnabled = computed(() => {
   return v === '1' || String(v ?? '1').toLowerCase() === 'true'
 })
 
+/** 尋找遊戲是否啟用（來自 .env） */
+const isFoundGameEnabled = computed(() => {
+  const v = import.meta.env.VITE_FOUND_GAME_ENABLED
+  return v === '1' || String(v ?? '').toLowerCase() === 'true'
+})
+
+/** 選版型後角色輪播遊戲是否啟用（來自 .env） */
+const isChooseCharacterEnabled = computed(() => {
+  const v = import.meta.env.VITE_CHOOSE_CHARACTER_ENABLED
+  return v !== '0' && String(v ?? '1').toLowerCase() !== 'false'
+})
+
 const hidden = ref(true)
 const uploadCloudMessage = ref('')
 const dbClearMessage = ref('')
@@ -87,6 +99,12 @@ function onClearTestData() {
 }
 
 function goTo(id: ScreenName) {
+  if (id === 'found-game') {
+    setUnlockedTemplateIndices(null)
+  }
+  if (id === 'choose-character' && templates.value.length > 0) {
+    selectTemplate(templates.value[getDefaultTemplateIndex()] ?? null)
+  }
   if (id === 'template') {
     setUnlockedTemplateIndices([0, 1, 2, 3])
     if (templates.value.length > 0) {
@@ -94,7 +112,7 @@ function goTo(id: ScreenName) {
     }
   }
   // 測試相關畫面：從測試面板進入時一律標記為測試流程
-  if (id === 'template' || id === 'memory-game' || id === 'carrier-input' || id === 'carrier-preview' || id === 'test-filter' || id === 'result' || id === 'result-no-qr' || id === 'uploading' || id === 'processing') {
+  if (id === 'template' || id === 'memory-game' || id === 'found-game' || id === 'choose-character' || id === 'carrier-input' || id === 'carrier-preview' || id === 'test-filter' || id === 'result' || id === 'result-no-qr' || id === 'uploading' || id === 'processing') {
     setTestSession(true)
   }
   // #region agent log
@@ -188,8 +206,14 @@ onUnmounted(() => {
       <button v-if="isMemoryGameEnabled" type="button" class="btn primary" @click="goTo('memory-game')">
         測試：翻牌遊戲
       </button>
+      <button v-if="isFoundGameEnabled" type="button" class="btn primary" @click="goTo('found-game')">
+        測試：尋找遊戲
+      </button>
       <button type="button" class="btn primary" @click="goTo('template')">
         測試：選版型畫面
+      </button>
+      <button v-if="isChooseCharacterEnabled" type="button" class="btn primary" @click="goTo('choose-character')">
+        測試：角色輪播
       </button>
       <button type="button" class="btn primary" @click="goTo('db-view')">
         觀看資料庫

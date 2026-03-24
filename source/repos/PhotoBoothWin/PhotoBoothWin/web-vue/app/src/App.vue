@@ -3,6 +3,8 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { usePhotobooth } from '@/composables/usePhotobooth'
 import ScreenIdle from '@/components/photobooth/ScreenIdle.vue'
 import ScreenMemoryGame from '@/components/photobooth/ScreenMemoryGame.vue'
+import ScreenFoundGame from '@/components/photobooth/ScreenFoundGame.vue'
+import ScreenChooseCharacter from '@/components/photobooth/ScreenChooseCharacter.vue'
 import ScreenTemplate from '@/components/photobooth/ScreenTemplate.vue'
 import ScreenResult from '@/components/photobooth/ScreenResult.vue'
 import ScreenResultNoQr from '@/components/photobooth/ScreenResultNoQr.vue'
@@ -43,6 +45,18 @@ const isMemoryGameEnabled = () => {
   return v === '1' || String(v ?? '1').toLowerCase() === 'true'
 }
 
+/** 尋找遊戲開關（來自 .env） */
+const isFoundGameEnabled = () => {
+  const v = import.meta.env.VITE_FOUND_GAME_ENABLED
+  return v === '1' || String(v ?? '').toLowerCase() === 'true'
+}
+
+/** 選版型後角色輪播遊戲開關（來自 .env，預設開啟） */
+const isChooseCharacterEnabled = () => {
+  const v = import.meta.env.VITE_CHOOSE_CHARACTER_ENABLED
+  return v !== '0' && String(v ?? '1').toLowerCase() !== 'false'
+}
+
 /** 已付金額累積：紙鈔只收 100 元；投幣器被動、可累積超過 100（例如 200），滿 100 扣一次進選版型，回到待機後餘額若仍 >= 100 再進選版型一次 */
 const paidAccumulated = ref(0)
 
@@ -73,7 +87,9 @@ async function runScheduledUploadWhenIdle() {
 }
 
 function goToNextScreen() {
-  if (isMemoryGameEnabled()) {
+  if (isFoundGameEnabled()) {
+    showScreen('found-game')
+  } else if (isMemoryGameEnabled()) {
     showScreen('memory-game')
   } else {
     setUnlockedTemplateIndices([0, 1, 2, 3])
@@ -236,6 +252,8 @@ onUnmounted(() => {
     />
     <TestPanel />
     <ScreenMemoryGame v-if="isMemoryGameEnabled()" :class="{ active: currentScreen === 'memory-game' }" />
+    <ScreenFoundGame v-if="isFoundGameEnabled()" :class="{ active: currentScreen === 'found-game' }" />
+    <ScreenChooseCharacter v-if="isChooseCharacterEnabled()" :class="{ active: currentScreen === 'choose-character' }" />
     <ScreenTemplate :class="{ active: currentScreen === 'template' }" />
     <ScreenResult :class="{ active: currentScreen === 'result' }" />
     <ScreenResultNoQr :class="{ active: currentScreen === 'result-no-qr' }" />
@@ -244,7 +262,7 @@ onUnmounted(() => {
     <ScreenCarrierInput v-if="isCarrierEnabled()" :class="{ active: currentScreen === 'carrier-input' }" />
     <ScreenCarrierPreview v-if="isCarrierEnabled()" :class="{ active: currentScreen === 'carrier-preview' }" />
     <LoadingOverlay />
-    <Footer />
+    <Footer v-if="currentScreen !== 'found-game'" />
   </div>
 </template>
 

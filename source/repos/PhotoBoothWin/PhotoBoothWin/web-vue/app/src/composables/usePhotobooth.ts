@@ -94,6 +94,21 @@ const TEMPLATES: Template[] = [
   },
 ]
 
+/** 選角暫停後列印：2"×6" 條幅（300dpi 常見 600×1800），Hot Folder 子資料夾名為 2x6 */
+export const CHOOSE_CHARACTER_2X6: Template = {
+  id: 'choose-character-2x6',
+  preview: '',
+  shotCount: 1,
+  sizeKey: '2x6',
+  captureW: 600,
+  captureH: 1800,
+  stageSize: { maxWidth: '1000px', maxHeight: 'calc(100vh - 200px)' },
+  frameAspectRatio: '600/1800',
+  width: 600,
+  height: 1800,
+  slots: [{ x: 0, y: 0, w: 600, h: 1800 }],
+}
+
 // 單例狀態：所有元件共用同一份，測試面板的切換才會生效
 const currentScreen = ref<ScreenName>('idle')
 const selectedTemplate = shallowRef<Template | null>(null)
@@ -115,6 +130,8 @@ const stickersBySlot = ref<Record<number, StickerInstance[]>>({})
 const nextStickerId = ref(1)
 /** 記憶遊戲解鎖的版型索引（0=bk01, 1=bk02...）。null 表示顯示全部（如測試面板） */
 const unlockedTemplateIndices = ref<number[] | null>(null)
+/** 選角流程：合成完成進結果頁後立刻進列印中（略過結果頁倒數） */
+const immediatePrintAfterNextResult = ref(false)
 const templates = computed(() => TEMPLATES)
 /** 選版型頁面顯示的版型：若有解鎖列表則只顯示解鎖的，否則顯示全部 */
 const availableTemplates = computed(() => {
@@ -627,6 +644,25 @@ export function usePhotobooth() {
     }
   }
 
+  /**
+   * 將選角暫停時鎖定的角色圖合成為 2×6 條幅並走與一般相同的結果／上傳流程；
+   * 設 immediatePrintAfterNextResult，結果頁會立刻進列印中。
+   */
+  async function buildChooseCharacterStripPrint(imageUrl: string) {
+    selectedTemplate.value = CHOOSE_CHARACTER_2X6
+    captureResults.value = [imageUrl]
+    selectedFilter.value = null
+    stickersBySlot.value = {}
+    immediatePrintAfterNextResult.value = true
+    try {
+      await buildFinalOutput()
+    } finally {
+      if (!finalFilePath.value) {
+        immediatePrintAfterNextResult.value = false
+      }
+    }
+  }
+
   function runDevStartPage() {
     const raw = import.meta.env.VITE_DEV_START_PAGE
     const n = raw !== undefined && raw !== '' ? parseInt(raw, 10) : null
@@ -668,6 +704,8 @@ export function usePhotobooth() {
     setCaptureVideoBlob,
     resetSession,
     buildFinalOutput,
+    buildChooseCharacterStripPrint,
+    immediatePrintAfterNextResult,
     runDevStartPage,
     setResultMock,
     callHost,

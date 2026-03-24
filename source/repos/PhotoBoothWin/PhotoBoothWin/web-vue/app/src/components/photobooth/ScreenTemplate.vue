@@ -5,6 +5,11 @@ import { usePhotobooth } from '@/composables/usePhotobooth'
 
 const { availableTemplates, selectedTemplate, selectTemplate, showScreen } = usePhotobooth()
 
+function isChooseCharacterEnabled() {
+  const v = import.meta.env.VITE_CHOOSE_CHARACTER_ENABLED
+  return v !== '0' && String(v ?? '1').toLowerCase() !== 'false'
+}
+
 const msgboxVisible = ref(false)
 const templateListRef = ref<HTMLElement | null>(null)
 const hasSelection = computed(() => !!selectedTemplate.value)
@@ -19,8 +24,9 @@ function onCardClick(t: Template) {
 
 function confirmTemplate() {
   msgboxVisible.value = false
-  if (isCarrierEnabled()) {
-    // 進入載具輸入流程（鍵盤輸入 → 預覽版型 → HiTi 列印）
+  if (isChooseCharacterEnabled()) {
+    showScreen('choose-character')
+  } else if (isCarrierEnabled()) {
     showScreen('carrier-input')
   } else {
     showScreen('idle')

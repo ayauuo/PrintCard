@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
 import { usePhotobooth } from '@/composables/usePhotobooth'
 
 const {
@@ -15,6 +15,7 @@ const {
   resetSession,
   autoPrint,
   isTestSession,
+  immediatePrintAfterNextResult,
 } = usePhotobooth()
 
 const copies = ref(1)
@@ -136,10 +137,17 @@ function goToPrintingThenIdle() {
 
 // 結果頁：有合成結果時啟動 N 秒（ENV）自動列印，沒按就自動進列印中（需 VITE_SKIP_PRINT=0 才會真的送 DNP）
 watch(
-  [() => currentScreen.value, () => finalFilePath.value],
+  [() => currentScreen.value, () => finalFilePath.value, () => immediatePrintAfterNextResult.value],
   ([screen, path]) => {
     clearAutoGoTimer()
     if (screen !== 'result' || !path) return
+    if (immediatePrintAfterNextResult.value) {
+      immediatePrintAfterNextResult.value = false
+      void nextTick(() => {
+        goToPrintingThenIdle()
+      })
+      return
+    }
     const sec = getResultAutoPrintSec()
     autoGoTimer.value = setTimeout(() => {
       autoGoTimer.value = null
