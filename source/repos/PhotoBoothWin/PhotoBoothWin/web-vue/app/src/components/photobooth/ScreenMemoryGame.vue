@@ -28,6 +28,9 @@ const timeLeft = ref(GAME_TIME_MS / 1000)
 const gameOver = ref(false)
 let timerId: ReturnType<typeof setInterval> | null = null
 
+/** 遊戲結束時的結果：'time-up' 時間到 | 'all-done' 全部配對完成 */
+const gameResultPhase = ref<'time-up' | 'all-done' | null>(null)
+
 const removedCount = computed(() => cards.value.filter((c) => c.removed).length)
 
 /** 數字 n (1~4) 是否已全部移除（4 張都 removed） */
@@ -55,21 +58,41 @@ function shuffleArray<T>(arr: T[]): T[] {
   return a
 }
 
-function endGame() {
+function goToNextScreen() {
+  const unlocked = getUnlockedIndices()
+  if (unlocked.length > 0) {
+    setUnlockedTemplateIndices(unlocked)
+  } else {
+    // 沒有完成任何版型：隨機選一個版型顯示
+    const randomIndex = Math.floor(Math.random() * 4)
+    setUnlockedTemplateIndices([randomIndex])
+  }
+  showScreen('template')
+}
+
+function endGame(reason: 'time-up' | 'all-done') {
   if (gameOver.value) return
   gameOver.value = true
   if (timerId) {
     clearInterval(timerId)
     timerId = null
   }
-  const unlocked = getUnlockedIndices()
-  if (unlocked.length > 0) {
-    setUnlockedTemplateIndices(unlocked)
-    setTimeout(() => showScreen('template'), 300)
-  } else {
-    setUnlockedTemplateIndices(null)
-    setTimeout(() => showScreen('idle'), 300)
+
+  if (reason === 'time-up') {
+    // 時間到：先把所有剩餘的牌翻開
+    cards.value.forEach((card) => {
+      if (!card.removed) {
+        card.flipped = true
+      }
+    })
   }
+
+  gameResultPhase.value = reason
+  const delayMs = 1000 // 顯示大字 1 秒後再進選版型
+  setTimeout(() => {
+    gameResultPhase.value = null
+    goToNextScreen()
+  }, delayMs)
 }
 
 function onUnderstandClick() {
@@ -113,7 +136,7 @@ function initGame() {
   }
   timerId = setInterval(() => {
     timeLeft.value = Math.max(0, timeLeft.value - 1)
-    if (timeLeft.value <= 0) endGame()
+    if (timeLeft.value <= 0) endGame('time-up')
   }, 1000)
 }
 
@@ -145,7 +168,7 @@ function flipCard(index: number) {
         c1.removed = true
         c2.removed = true
         const allDone = cards.value.filter((c) => c.removed).length === 16
-        if (allDone) endGame()
+        if (allDone) endGame('all-done')
       }, 500)
     } else if (c1 && c2) {
       setTimeout(() => {
@@ -167,6 +190,7 @@ watch(
     if (isActive) {
       phase.value = 'rules'
       countdownNum.value = 3
+      gameResultPhase.value = null
       if (countdownTimer) {
         clearInterval(countdownTimer)
         countdownTimer = null
@@ -207,11 +231,10 @@ onUnmounted(() => {
       <span class="memory-game__countdown-num">{{ countdownNum }}</span>
       <span class="memory-game__countdown-label">秒後開始</span>
     </div>
-    <!-- 遊戲主畫面 -->
-    <div v-else class="memory-game__panel">
-      <div class="memory-game__header">
-        <h1 class="memory-game__title">翻牌配對</h1>
-        <p class="memory-game__hint">20 秒內盡可能配對，配對完的數字對應解鎖版型</p>
+    <!-- 遊戲主畫面（含結束時的 overlay） -->
+    <template v-else>
+      <div class="memory-game__panel">
+        <div class="memory-game__header">
         <div class="memory-game__timer" :class="{ 'is-low': timeLeft <= 5 }">
           剩餘 {{ timeLeft }} 秒
         </div>
@@ -235,14 +258,27 @@ onUnmounted(() => {
               <span class="memory-game__card-back-text">?</span>
             </span>
             <span class="memory-game__card-front">
-              <span class="memory-game__card-corner memory-game__card-corner--tl">{{ card.value }}</span>
-              <span class="memory-game__card-center">{{ card.value }}</span>
-              <span class="memory-game__card-corner memory-game__card-corner--br">{{ card.value }}</span>
+              <img
+                :src="`/assets/templates/CardGame/${card.value}.jpg`"
+                :alt="`圖案 ${card.value}`"
+                class="memory-game__card-image"
+              />
             </span>
           </span>
         </button>
       </div>
     </div>
+    <!-- 遊戲結束 overlay：大字顯示結果 -->
+    <Transition name="result-overlay">
+      <div
+        v-if="gameResultPhase"
+        class="memory-game__result-overlay"
+        :class="{ 'is-time-up': gameResultPhase === 'time-up', 'is-all-done': gameResultPhase === 'all-done' }"
+      >
+        <span class="memory-game__result-text">{{ gameResultPhase === 'time-up' ? '時間到' : '太棒了' }}</span>
+      </div>
+    </Transition>
+    </template>
   </div>
 </template>
 
@@ -494,26 +530,59 @@ onUnmounted(() => {
   transform: rotateY(180deg);
 }
 
-.memory-game__card-corner {
-  position: absolute;
-  font-size: clamp(12px, 2vh, 18px);
-  font-weight: 700;
-  line-height: 1;
+.memory-game__card-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
 
-  &--tl {
-    top: 4px;
-    left: 6px;
+/* 遊戲結束 overlay：大字顯示 */
+.memory-game__result-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 100;
+  pointer-events: none;
+}
+
+.memory-game__result-text {
+  font-size: clamp(72px, 15vw, 140px);
+  font-weight: 800;
+  letter-spacing: 12px;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  animation: result-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.memory-game__result-overlay.is-time-up .memory-game__result-text {
+  color: #ff9f43;
+}
+
+.memory-game__result-overlay.is-all-done .memory-game__result-text {
+  color: #ffd93d;
+  text-shadow: 0 0 40px rgba(255, 217, 61, 0.6);
+}
+
+@keyframes result-pop {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
   }
-  &--br {
-    bottom: 4px;
-    right: 6px;
-    transform: rotate(180deg);
+  100% {
+    transform: scale(1);
+    opacity: 1;
   }
 }
 
-.memory-game__card-center {
-  font-size: clamp(24px, 4vh, 40px);
-  font-weight: 800;
-  color: #1a1a1a;
+.result-overlay-enter-active,
+.result-overlay-leave-active {
+  transition: opacity 0.3s ease;
+}
+.result-overlay-enter-from,
+.result-overlay-leave-to {
+  opacity: 0;
 }
 </style>
