@@ -46,6 +46,7 @@ export interface Template {
 
 export type ScreenName =
   | 'idle'
+  | 'customer-upload-qr'
   | 'memory-game'
   | 'found-game'
   | 'template'

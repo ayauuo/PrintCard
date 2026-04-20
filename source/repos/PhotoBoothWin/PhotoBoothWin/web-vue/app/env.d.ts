@@ -64,4 +64,17 @@ interface ImportMetaEnv {
   readonly VITE_BILL_ACCEPTOR_ENABLED?: string
   /** 投幣器開關：1/true 時啟用；0/false 時不啟動 */
   readonly VITE_COIN_ACCEPTOR_ENABLED?: string
+  /**
+   * 顧客手機上傳流程：1/true 時，待機付費／點擊後先進「掃 QR 上傳照片」再選版型合成
+   */
+  readonly VITE_CUSTOMER_UPLOAD_FLOW?: string
+  /** 手機開啟的「首頁」基底（會加上 ?session=工作階段 ID），勿填 /upload；預設 http://18.177.149.30:3000 */
+  readonly VITE_CUSTOMER_UPLOAD_QR_BASE?: string
+  /**
+   * 主機輪詢「是否已上傳」的完整 URL，需含 {{session}} 或 {{id}}（皆替換為同一 UUID）
+   * 例：http://18.177.149.30:3000/upload/status?session={{session}}
+   */
+  readonly VITE_CUSTOMER_UPLOAD_POLL_URL?: string
+  /** 輪詢間隔毫秒（預設 2000） */
+  readonly VITE_CUSTOMER_UPLOAD_POLL_MS?: string
 }

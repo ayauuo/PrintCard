@@ -279,6 +279,8 @@ onUnmounted(() => {
   justify-content: center;
   padding: 24px 0;
   flex-shrink: 0;
+  /* 整塊暫停鈕區上移約視窗高度 20% */
+  transform: translateY(-10vh);
 }
 
 .choose-character__track {
@@ -365,9 +367,9 @@ onUnmounted(() => {
 .choose-character__btn-pause-img {
   display: block;
   height: auto;
-  max-height: 96px;
+  max-height: 300px;
   width: auto;
-  max-width: min(360px, 40vw);
+  max-width: min(420px, 60vw);
   object-fit: contain;
   pointer-events: none;
   user-select: none;

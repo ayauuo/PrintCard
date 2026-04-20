@@ -1,7 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'ScreenResultNoQr' })
 
-import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, onBeforeUnmount } from 'vue'
 import { usePhotobooth } from '@/composables/usePhotobooth'
 
 const {
@@ -14,7 +14,7 @@ const {
   resetSession,
   autoPrint,
   isTestSession,
-  immediatePrintAfterNextResult,
+  goToPrintingThenIdle,
 } = usePhotobooth()
 
 const copies = ref(1)
@@ -78,75 +78,15 @@ function clearAutoGoTimer() {
   }
 }
 
-function goToPrintingThenIdle() {
-  const printingSec = getPrintingShowSec()
-  const skipPrint = getSkipPrint()
-  showScreen('processing')
-  if (!finalFilePath.value) {
-    setTimeout(() => { autoPrint.value = false; resetSession(); showScreen('idle') }, printingSec * 1000)
-    return
-  }
-  if (skipPrint) {
-    if (getLogPrintRecordWhenSkip()) {
-      callHost('log_print_record', {
-        templateName: selectedTemplate.value?.id ?? 'unknown',
-        printTime: new Date().toISOString(),
-        amount: getReceiptAmount(),
-        projectName: getProjectName(),
-        machineName: getMachineName(),
-        copies: 1,
-        fileName: getFinalFileName(),
-        isTest: getIsTest(),
-      }).finally(() => {
-        setTimeout(() => { autoPrint.value = false; resetSession(); showScreen('idle') }, printingSec * 1000)
-      })
-    } else {
-      setTimeout(() => { autoPrint.value = false; resetSession(); showScreen('idle') }, printingSec * 1000)
-    }
-    return
-  }
-  callHost('print_hotfolder', {
-    filePath: finalFilePath.value,
-    sizeKey: selectedTemplate.value?.sizeKey ?? '4x6',
-    copies: 1,
-  })
-    .then(() =>
-      callHost('log_print_record', {
-        templateName: selectedTemplate.value?.id ?? 'unknown',
-        printTime: new Date().toISOString(),
-        amount: getReceiptAmount(),
-        projectName: getProjectName(),
-        machineName: getMachineName(),
-        copies: copies.value,
-        fileName: getFinalFileName(),
-        isTest: getIsTest(),
-      })
-    )
-    .finally(() => {
-      setTimeout(() => {
-        autoPrint.value = false
-        resetSession()
-        showScreen('idle')
-      }, printingSec * 1000)
-    })
-}
-
 watch(
-  [() => currentScreen.value, () => finalFilePath.value, () => immediatePrintAfterNextResult.value],
+  [() => currentScreen.value, () => finalFilePath.value],
   ([screen, path]) => {
     clearAutoGoTimer()
     if (screen !== 'result-no-qr' || !path) return
-    if (immediatePrintAfterNextResult.value) {
-      immediatePrintAfterNextResult.value = false
-      void nextTick(() => {
-        goToPrintingThenIdle()
-      })
-      return
-    }
     const sec = getResultAutoPrintSec()
     autoGoTimer.value = setTimeout(() => {
       autoGoTimer.value = null
-      goToPrintingThenIdle()
+      goToPrintingThenIdle(copies.value)
     }, sec * 1000)
   },
   { immediate: true }

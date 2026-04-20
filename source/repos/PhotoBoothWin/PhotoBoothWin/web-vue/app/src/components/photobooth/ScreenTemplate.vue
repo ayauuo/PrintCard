@@ -3,7 +3,8 @@ import { ref, computed, watch } from 'vue'
 import type { Template } from '@/types/photobooth'
 import { usePhotobooth } from '@/composables/usePhotobooth'
 
-const { availableTemplates, selectedTemplate, selectTemplate, showScreen } = usePhotobooth()
+const { availableTemplates, selectedTemplate, selectTemplate, showScreen, isCustomerUploadFlow, startCustomerUploadCompose } =
+  usePhotobooth()
 
 function isChooseCharacterEnabled() {
   const v = import.meta.env.VITE_CHOOSE_CHARACTER_ENABLED
@@ -24,6 +25,10 @@ function onCardClick(t: Template) {
 
 function confirmTemplate() {
   msgboxVisible.value = false
+  if (isCustomerUploadFlow.value) {
+    startCustomerUploadCompose()
+    return
+  }
   if (isChooseCharacterEnabled()) {
     showScreen('choose-character')
   } else if (isCarrierEnabled()) {

@@ -112,7 +112,7 @@ function goTo(id: ScreenName) {
     }
   }
   // 測試相關畫面：從測試面板進入時一律標記為測試流程
-  if (id === 'template' || id === 'memory-game' || id === 'found-game' || id === 'choose-character' || id === 'carrier-input' || id === 'carrier-preview' || id === 'test-filter' || id === 'result' || id === 'result-no-qr' || id === 'uploading' || id === 'processing') {
+  if (id === 'template' || id === 'memory-game' || id === 'found-game' || id === 'choose-character' || id === 'customer-upload-qr' || id === 'carrier-input' || id === 'carrier-preview' || id === 'test-filter' || id === 'result' || id === 'result-no-qr' || id === 'uploading' || id === 'processing') {
     setTestSession(true)
   }
   // #region agent log
@@ -208,6 +208,9 @@ onUnmounted(() => {
       </button>
       <button v-if="isFoundGameEnabled" type="button" class="btn primary" @click="goTo('found-game')">
         測試：尋找遊戲
+      </button>
+      <button type="button" class="btn primary" @click="goTo('customer-upload-qr')">
+        測試：顧客上傳 QR
       </button>
       <button type="button" class="btn primary" @click="goTo('template')">
         測試：選版型畫面

@@ -35,6 +35,13 @@ const staticBackgroundUrl = computed(() =>
   slideImages[0] ? getSlideUrl(slideImages[0]) : ''
 )
 
+/** 輪播時目前顯示的圖 */
+const currentCarouselUrl = computed(() => {
+  const i = currentIndex.value
+  const name = slideImages[i]
+  return name ? getSlideUrl(name) : ''
+})
+
 const currentIndex = ref(0)
 let intervalId: ReturnType<typeof setInterval> | null = null
 
@@ -69,90 +76,74 @@ onUnmounted(() => {
     aria-label="待機畫面"
     @click="!props.isPaymentsEnabled && emit('clickToStart')"
   >
-    <!-- 無輪播：用第一張圖當靜態背景 -->
-    <div
-      v-if="!isCarousel"
-      class="idle-static"
-      :style="{
-        backgroundImage: `url('${staticBackgroundUrl}')`,
-      }"
-    />
-    <!-- 有輪播：多張輪播（目前同一張圖） -->
-    <div v-else class="idle-carousel">
-      <div
-        v-for="(img, i) in slideImages"
-        :key="i"
-        class="idle-carousel__slide"
-        :class="{ 'is-active': currentIndex === i }"
-        :style="{
-          backgroundImage: `url('${getSlideUrl(img)}')`,
-        }"
+    <div class="idle__scroll">
+      <img
+        v-if="!isCarousel"
+        class="idle__bg-img"
+        :src="staticBackgroundUrl"
+        alt=""
+        draggable="false"
       />
-    </div>
-    <!-- 阻止 SecretKeypad 區域的點擊冒泡，避免點擊管理熱點時誤觸進入選版型 -->
-    <div @click.stop>
-      <SecretKeypad />
+      <img
+        v-else
+        class="idle__bg-img"
+        :src="currentCarouselUrl"
+        alt=""
+        draggable="false"
+      />
+      <div class="idle__layer">
+        <SecretKeypad />
+      </div>
     </div>
   </div>
 </template>
 
 <style lang="scss" scoped>
-@use '@/styles/variables' as *;
-@use '@/styles/mixins' as *;
-
 .screen--idle {
-  position: absolute;
-  width: 1920px;
-  height: 1080px;
-  overflow: hidden;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: stretch;
+  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 
   &.is-click-to-start {
     cursor: pointer;
   }
 }
 
-.idle-click-hint {
-  position: absolute;
-  bottom: 80px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font-size: 48px;
-  font-weight: bold;
-  color: rgba(255, 255, 255, 0.9);
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+.idle__scroll {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 100%;
+  background-color: transparent;
+}
+
+.idle__bg-img {
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: auto;
   pointer-events: none;
+  user-select: none;
 }
 
-.idle-static,
-.idle-carousel__slide {
+.idle__layer {
   position: absolute;
-  inset: 0;
-  background-repeat: no-repeat;
-  background-size: contain;
-  background-position: center;
-}
-
-.idle-static {
+  left: 0;
+  top: 0;
   width: 100%;
   height: 100%;
-}
-
-.idle-carousel {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-
-  .idle-carousel__slide {
-    opacity: 0;
-    transition: opacity 0.8s ease-in-out;
-    pointer-events: none;
-
-    &.is-active {
-      opacity: 1;
-      pointer-events: auto;
-    }
-  }
+  min-height: 100%;
+  box-sizing: border-box;
+  pointer-events: none;
 }
 </style>

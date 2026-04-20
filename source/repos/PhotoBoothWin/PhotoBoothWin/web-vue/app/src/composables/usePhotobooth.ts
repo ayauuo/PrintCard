@@ -132,6 +132,10 @@ const nextStickerId = ref(1)
 const unlockedTemplateIndices = ref<number[] | null>(null)
 /** 選角流程：合成完成進結果頁後立刻進列印中（略過結果頁倒數） */
 const immediatePrintAfterNextResult = ref(false)
+/** 顧客用手機 QR 上傳後取得的圖片 URL（選版型後用於合成） */
+const pendingCustomerUploadUrl = ref<string>('')
+/** 是否為「先 QR 上傳再選版型」流程（避免選版型時 reset 清掉待合成圖） */
+const isCustomerUploadFlow = ref(false)
 const templates = computed(() => TEMPLATES)
 /** 選版型頁面顯示的版型：若有解鎖列表則只顯示解鎖的，否則顯示全部 */
 const availableTemplates = computed(() => {
@@ -223,11 +227,21 @@ export function usePhotobooth() {
       fetch('http://127.0.0.1:7242/ingest/60461173-9774-483b-a750-822bb1590c42', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b8574e' }, body: JSON.stringify({ sessionId: 'b8574e', location: 'usePhotobooth.ts:showScreen:before_reset', message: 'template_screen_isTest_before_reset', data: { name, isTestSession: isTestBeforeReset }, timestamp: Date.now(), hypothesisId: 'H1', runId: 'post-fix' }) }).catch(() => {})
       // #endregion
       const preserveTestSession = isTestSession.value
+      const savedCustomerUrl = pendingCustomerUploadUrl.value
+      const saveCustomerFlow = isCustomerUploadFlow.value
       resetSession()
       if (preserveTestSession) isTestSession.value = true
+      if (saveCustomerFlow && savedCustomerUrl) {
+        pendingCustomerUploadUrl.value = savedCustomerUrl
+        isCustomerUploadFlow.value = true
+      }
       // #region agent log
       fetch('http://127.0.0.1:7242/ingest/60461173-9774-483b-a750-822bb1590c42', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b8574e' }, body: JSON.stringify({ sessionId: 'b8574e', location: 'usePhotobooth.ts:showScreen:after_reset', message: 'template_screen_isTest_after_reset', data: { name, isTestSession: isTestSession.value }, timestamp: Date.now(), hypothesisId: 'H1', runId: 'post-fix' }) }).catch(() => {})
       // #endregion
+      notifyBillAcceptorState(false)
+    }
+    if (name === 'customer-upload-qr') {
+      resetSession()
       notifyBillAcceptorState(false)
     }
     if (name === 'idle') {
@@ -332,10 +346,41 @@ export function usePhotobooth() {
     selectedFilter.value = null
     isTestSession.value = false
     stickersBySlot.value = {}
+    pendingCustomerUploadUrl.value = ''
+    isCustomerUploadFlow.value = false
   }
 
   function setTestSession(isTest: boolean) {
     isTestSession.value = isTest
+  }
+
+  /** 手機上傳完成後：記住圖片 URL 並進入選版型（與 showScreen('template') 內保留邏輯搭配） */
+  function setPendingCustomerUploadAndGoToTemplate(imageUrl: string) {
+    pendingCustomerUploadUrl.value = imageUrl
+    isCustomerUploadFlow.value = true
+    unlockedTemplateIndices.value = [0, 1, 2, 3]
+    const list = templates.value
+    if (list.length > 0) {
+      const idx = getDefaultTemplateIndex()
+      const tpl = list[idx] ?? list[0] ?? null
+      if (tpl) selectTemplate(tpl)
+    }
+    showScreen('template')
+  }
+
+  /**
+   * 選版型確認：在顧客上傳流程中，將同一張照片重複填入各格並合成
+   */
+  function startCustomerUploadCompose(): boolean {
+    const url = pendingCustomerUploadUrl.value
+    const tpl = selectedTemplate.value
+    if (!url || !tpl) return false
+    setCaptureResults(Array.from({ length: tpl.shotCount }, () => url))
+    pendingCustomerUploadUrl.value = ''
+    isCustomerUploadFlow.value = false
+    showScreen('uploading')
+    void buildFinalOutput()
+    return true
   }
 
   function setResultMock() {
@@ -423,6 +468,119 @@ export function usePhotobooth() {
     }
   }
 
+  function getPrintingShowSecForPrint(): number {
+    const raw = import.meta.env.VITE_PRINTING_SHOW_SEC
+    if (raw === undefined || raw === '') return 20
+    const n = parseInt(raw, 10)
+    return Number.isNaN(n) || n < 1 ? 20 : Math.min(120, n)
+  }
+
+  function getSkipPrintForPrint(): boolean {
+    const v = import.meta.env.VITE_SKIP_PRINT
+    return v === '1' || String(v).toLowerCase() === 'true'
+  }
+
+  function getReceiptAmountForPrint(): string {
+    const v = import.meta.env.VITE_RECEIPT_AMOUNT
+    return typeof v === 'string' && v !== '' ? v : '0'
+  }
+
+  function getLogPrintRecordWhenSkipForPrint(): boolean {
+    const v = import.meta.env.VITE_LOG_PRINT_RECORD_WHEN_SKIP
+    return v === '1' || String(v).toLowerCase() === 'true'
+  }
+
+  function getProjectNameForPrint(): string {
+    const v = import.meta.env.VITE_PROJECT_NAME
+    return typeof v === 'string' ? v : ''
+  }
+
+  function getMachineNameForPrint(): string {
+    const v = import.meta.env.VITE_MACHINE_NAME
+    return typeof v === 'string' ? v : ''
+  }
+
+  function getIsTestForPrint(): boolean {
+    if (isTestSession.value) return true
+    const v = import.meta.env.VITE_TEST_FAST_COUNTDOWN
+    return v === '1' || String(v).toLowerCase() === 'true'
+  }
+
+  function getFinalFileNameForPrint(): string {
+    const path = finalFilePath.value
+    if (!path) return ''
+    return path.replace(/^.*[/\\]/, '') || ''
+  }
+
+  /**
+   * 結果頁自動列印／選角立即列印共用：進列印中 → DNP → 紀錄 → N 秒後回待機。
+   * @param copiesForRecord 寫入 CSV 的份數（熱資料夾仍送 1 張，與原 ScreenResult 自動列印一致）
+   */
+  function goToPrintingThenIdle(copiesForRecord = 1) {
+    const printingSec = getPrintingShowSecForPrint()
+    const skipPrint = getSkipPrintForPrint()
+    showScreen('processing')
+    if (!finalFilePath.value) {
+      setTimeout(() => {
+        autoPrint.value = false
+        resetSession()
+        showScreen('idle')
+      }, printingSec * 1000)
+      return
+    }
+    if (skipPrint) {
+      if (getLogPrintRecordWhenSkipForPrint()) {
+        callHost('log_print_record', {
+          templateName: selectedTemplate.value?.id ?? 'unknown',
+          printTime: new Date().toISOString(),
+          amount: getReceiptAmountForPrint(),
+          projectName: getProjectNameForPrint(),
+          machineName: getMachineNameForPrint(),
+          copies: copiesForRecord,
+          fileName: getFinalFileNameForPrint(),
+          isTest: getIsTestForPrint(),
+        }).finally(() => {
+          setTimeout(() => {
+            autoPrint.value = false
+            resetSession()
+            showScreen('idle')
+          }, printingSec * 1000)
+        })
+      } else {
+        setTimeout(() => {
+          autoPrint.value = false
+          resetSession()
+          showScreen('idle')
+        }, printingSec * 1000)
+      }
+      return
+    }
+    callHost('print_hotfolder', {
+      filePath: finalFilePath.value,
+      sizeKey: selectedTemplate.value?.sizeKey ?? '4x6',
+      copies: 1,
+    })
+      .then(() =>
+        callHost('log_print_record', {
+          templateName: selectedTemplate.value?.id ?? 'unknown',
+          printTime: new Date().toISOString(),
+          amount: getReceiptAmountForPrint(),
+          projectName: getProjectNameForPrint(),
+          machineName: getMachineNameForPrint(),
+          copies: copiesForRecord,
+          fileName: getFinalFileNameForPrint(),
+          isTest: getIsTestForPrint(),
+        })
+      )
+      .finally(() => {
+        setTimeout(() => {
+          autoPrint.value = false
+          resetSession()
+          showScreen('idle')
+        }, printingSec * 1000)
+      })
+  }
+
   async function buildFinalOutput() {
     const tpl = selectedTemplate.value
     if (!tpl) return
@@ -448,6 +606,9 @@ export function usePhotobooth() {
       const loadImg = (src: string) =>
         new Promise<HTMLImageElement>((resolve, reject) => {
           const img = new Image()
+          if (src.startsWith('http://') || src.startsWith('https://')) {
+            img.crossOrigin = 'anonymous'
+          }
           img.onload = () => resolve(img)
           img.onerror = reject
           img.src = src
@@ -623,7 +784,13 @@ export function usePhotobooth() {
           .catch(() => { qrImageUrl.value = '' })
       }
 
-      showScreen(showQrCode.value ? 'result' : 'result-no-qr')
+      // 選角立即列印：不經結果頁（避免閃爍），直接進列印中
+      if (immediatePrintAfterNextResult.value) {
+        immediatePrintAfterNextResult.value = false
+        goToPrintingThenIdle(1)
+      } else {
+        showScreen(showQrCode.value ? 'result' : 'result-no-qr')
+      }
 
       const isTestMode = (v: string | undefined) => v === '1' || String(v).toLowerCase() === 'true'
       if (!isTestMode(import.meta.env.VITE_TEST_FAST_COUNTDOWN) && isTestMode(import.meta.env.VITE_LOG_USAGE)) {
@@ -644,18 +811,101 @@ export function usePhotobooth() {
     }
   }
 
+  function blobToDataUrl(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader()
+      r.onload = () => resolve(r.result as string)
+      r.onerror = () => reject(new Error('readAsDataURL failed'))
+      r.readAsDataURL(blob)
+    })
+  }
+
+  function loadImageElement(src: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      if (src.startsWith('http://') || src.startsWith('https://')) {
+        img.crossOrigin = 'anonymous'
+      }
+      img.onload = () => resolve(img)
+      img.onerror = () => reject(new Error('image load failed'))
+      img.src = src
+    })
+  }
+
   /**
-   * 將選角暫停時鎖定的角色圖合成為 2×6 條幅並走與一般相同的結果／上傳流程；
-   * 設 immediatePrintAfterNextResult，結果頁會立刻進列印中。
+   * 選角列印專用：不上傳頁、不上傳 QR、不套版型外框／多格合成。
+   * 優先以 fetch 原圖存檔；失敗時改為單次縮放至 2×6 印張像素再存 JPEG。
    */
-  async function buildChooseCharacterStripPrint(imageUrl: string) {
-    selectedTemplate.value = CHOOSE_CHARACTER_2X6
-    captureResults.value = [imageUrl]
+  async function buildChooseCharacterPrintOnly(imageUrl: string) {
+    const tpl = CHOOSE_CHARACTER_2X6
+    selectedTemplate.value = tpl
     selectedFilter.value = null
     stickersBySlot.value = {}
+
+    let dataUrl: string
+    try {
+      const res = await fetch(imageUrl)
+      if (!res.ok) throw new Error('fetch failed')
+      const blob = await res.blob()
+      dataUrl = await blobToDataUrl(blob)
+    } catch {
+      const img = await loadImageElement(imageUrl)
+      const canvas = document.createElement('canvas')
+      canvas.width = tpl.width
+      canvas.height = tpl.height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      const scale = Math.max(tpl.width / img.naturalWidth, tpl.height / img.naturalHeight)
+      const drawW = img.naturalWidth * scale
+      const drawH = img.naturalHeight * scale
+      const dx = (tpl.width - drawW) / 2
+      const dy = (tpl.height - drawH) / 2
+      ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, dx, dy, drawW, drawH)
+      img.src = ''
+      dataUrl = canvas.toDataURL('image/jpeg', 0.9)
+      canvas.width = 1
+      canvas.height = 1
+    }
+
+    const saveRes = await callHost('save_image', { imageData: dataUrl }) as { filePath?: string }
+    const filePath = saveRes.filePath ?? ''
+    finalFilePath.value = filePath
+    finalPreviewUrl.value = dataUrl
+
+    callHost('result_image_ready', {
+      filePath,
+      imageData: dataUrl,
+      sizeKey: tpl.sizeKey ?? '2x6',
+    }).catch(() => {})
+
+    if (immediatePrintAfterNextResult.value) {
+      immediatePrintAfterNextResult.value = false
+      goToPrintingThenIdle(1)
+    }
+
+    const isTestMode = (v: string | undefined) => v === '1' || String(v).toLowerCase() === 'true'
+    if (!isTestMode(import.meta.env.VITE_TEST_FAST_COUNTDOWN) && isTestMode(import.meta.env.VITE_LOG_USAGE)) {
+      try {
+        await callHost('append_usage_log', {
+          folder: 'daily report',
+          time: new Date().toISOString(),
+          templateId: tpl.id,
+          projectName: import.meta.env.VITE_PROJECT_NAME ?? '',
+          isTest: isTestSession.value,
+        })
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  /**
+   * 選角暫停後：不經上傳頁、不合成版型、不上傳 QR，直接存圖並進列印。
+   */
+  async function buildChooseCharacterStripPrint(imageUrl: string) {
     immediatePrintAfterNextResult.value = true
     try {
-      await buildFinalOutput()
+      await buildChooseCharacterPrintOnly(imageUrl)
     } finally {
       if (!finalFilePath.value) {
         immediatePrintAfterNextResult.value = false
@@ -706,11 +956,16 @@ export function usePhotobooth() {
     buildFinalOutput,
     buildChooseCharacterStripPrint,
     immediatePrintAfterNextResult,
+    goToPrintingThenIdle,
     runDevStartPage,
     setResultMock,
     callHost,
     setCaptureResultsFromTestImages,
     setTestSession,
+    isCustomerUploadFlow,
+    pendingCustomerUploadUrl,
+    setPendingCustomerUploadAndGoToTemplate,
+    startCustomerUploadCompose,
     // 貼圖相關（依格分開，key = 格索引 0-based）
     stickersBySlot,
     addSticker,

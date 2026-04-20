@@ -53,7 +53,7 @@ function initStickers() {
     rotation: Math.random() * 360,
     visible: true,
   }
-  const extraWeapon7 = Array.from({ length: 100 }, () => ({
+  const extraWeapon7 = Array.from({ length: 60 }, () => ({
     id: `w-${nextId++}`,
     weaponNum: 7,
     x: 10 + Math.random() * 80,
@@ -67,9 +67,123 @@ function initStickers() {
 
 const visibleStickers = computed(() => stickers.value.filter((s) => s.visible))
 
+/** 武器圖快取：用於依 alpha 判定是否點在非透明像素上 */
+const weaponHitCanvas = new Map<number, HTMLCanvasElement>()
+
+const ALPHA_HIT_THRESHOLD = 24
+
+function stickerBoxSize(weaponNum: number): { w: number; h: number } {
+  return weaponNum <= 6 ? { w: 200, h: 365 } : { w: 300, h: 548 }
+}
+
+async function ensureWeaponHitCanvas(weaponNum: number): Promise<HTMLCanvasElement | null> {
+  const existing = weaponHitCanvas.get(weaponNum)
+  if (existing) return existing
+  const src = `${WEAPON_BASE}/weapon${weaponNum}.png`
+  try {
+    const img = new Image()
+    img.decoding = 'async'
+    img.src = src
+    await img.decode()
+    const nw = img.naturalWidth
+    const nh = img.naturalHeight
+    if (nw <= 0 || nh <= 0) return null
+    const c = document.createElement('canvas')
+    c.width = nw
+    c.height = nh
+    const ctx = c.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return null
+    ctx.drawImage(img, 0, 0)
+    weaponHitCanvas.set(weaponNum, c)
+    return c
+  } catch {
+    return null
+  }
+}
+
+async function preloadWeaponHitCanvases() {
+  await Promise.all([1, 2, 3, 4, 5, 6, 7].map((n) => ensureWeaponHitCanvas(n)))
+}
+
+/** 螢幕座標轉貼紙邊框盒內座標（左上為 0,0），旋轉以中心為軸 */
+function clientToStickerLocal(
+  stageRect: DOMRect,
+  s: WeaponSticker,
+  clientX: number,
+  clientY: number,
+  boxW: number,
+  boxH: number
+): { ux: number; uy: number } {
+  // 目前樣式同時用了 margin 負偏移 + translate(-50%, -50%)，
+  // 貼紙實際中心會比 left/top 再往左上半個 box。
+  const cx = stageRect.left + (s.x / 100) * stageRect.width - boxW / 2
+  const cy = stageRect.top + (s.y / 100) * stageRect.height - boxH / 2
+  const dx = clientX - cx
+  const dy = clientY - cy
+  const rad = (-s.rotation * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const lx = dx * cos - dy * sin
+  const ly = dx * sin + dy * cos
+  return { ux: lx + boxW / 2, uy: ly + boxH / 2 }
+}
+
+/** object-fit: contain 下，邊框盒座標對應到圖檔自然像素；落在 letterbox 則為透明 */
+function localToNatural(
+  ux: number,
+  uy: number,
+  naturalW: number,
+  naturalH: number,
+  boxW: number,
+  boxH: number
+): { nx: number; ny: number } | null {
+  const scale = Math.min(boxW / naturalW, boxH / naturalH)
+  const drawW = naturalW * scale
+  const drawH = naturalH * scale
+  const ox = (boxW - drawW) / 2
+  const oy = (boxH - drawH) / 2
+  if (ux < ox || uy < oy || ux >= ox + drawW || uy >= oy + drawH) return null
+  return { nx: (ux - ox) / scale, ny: (uy - oy) / scale }
+}
+
+function isOpaqueAtNatural(weaponNum: number, nx: number, ny: number): boolean {
+  const c = weaponHitCanvas.get(weaponNum)
+  if (!c) return false
+  const ix = Math.floor(nx)
+  const iy = Math.floor(ny)
+  if (ix < 0 || iy < 0 || ix >= c.width || iy >= c.height) return false
+  const ctx = c.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return false
+  const d = ctx.getImageData(ix, iy, 1, 1).data
+  return d[3]! > ALPHA_HIT_THRESHOLD
+}
+
+/** 由上而下（同 z-index 後蓋前）挑第一個非透明命中 */
+function pickStickerAt(clientX: number, clientY: number): WeaponSticker | null {
+  const stage = stageRef.value
+  if (!stage) return null
+  const stageRect = stage.getBoundingClientRect()
+  const list = [...visibleStickers.value]
+  for (let i = list.length - 1; i >= 0; i--) {
+    const s = list[i]!
+    const { w, h } = stickerBoxSize(s.weaponNum)
+    const { ux, uy } = clientToStickerLocal(stageRect, s, clientX, clientY, w, h)
+    if (ux < 0 || uy < 0 || ux > w || uy > h) continue
+    const canvas = weaponHitCanvas.get(s.weaponNum)
+    if (!canvas) continue
+    const nat = localToNatural(ux, uy, canvas.width, canvas.height, w, h)
+    if (!nat) continue
+    if (isOpaqueAtNatural(s.weaponNum, nat.nx, nat.ny)) return s
+  }
+  return null
+}
+
 let draggingId: string | null = null
 let lastClientX = 0
 let lastClientY = 0
+/** 本次按下是否曾移動超過閾值（用於區分點擊／拖曳） */
+let dragMovedSq = 0
+const CLICK_MOVE_THRESHOLD_PX = 8
 
 function getSticker(id: string) {
   return stickers.value.find((s) => s.id === id)
@@ -77,59 +191,53 @@ function getSticker(id: string) {
 
 const stageRef = ref<HTMLElement | null>(null)
 
-function onStickerMouseDown(e: MouseEvent, id: string) {
+function beginPointerOnSticker(e: PointerEvent, id: string) {
   e.preventDefault()
   draggingId = id
+  dragMovedSq = 0
   lastClientX = e.clientX
   lastClientY = e.clientY
 }
 
-function onStickerTouchStart(e: TouchEvent, id: string) {
-  const t = e.touches[0]
-  if (!t) return
-  draggingId = id
-  lastClientX = t.clientX
-  lastClientY = t.clientY
+function onStagePointerDown(e: PointerEvent) {
+  if (e.button !== 0 && e.pointerType === 'mouse') return
+  const hit = pickStickerAt(e.clientX, e.clientY)
+  if (!hit) return
+  beginPointerOnSticker(e, hit.id)
 }
 
-function onMouseMove(e: MouseEvent) {
+function applyDragDelta(clientX: number, clientY: number) {
   const stage = stageRef.value
-  if (draggingId && stage) {
-    const s = getSticker(draggingId)
-    if (s) {
-      const rect = stage.getBoundingClientRect()
-      const dx = ((e.clientX - lastClientX) / rect.width) * 100
-      const dy = ((e.clientY - lastClientY) / rect.height) * 100
-      s.x = Math.max(0, Math.min(100, s.x + dx))
-      s.y = Math.max(0, Math.min(100, s.y + dy))
-      lastClientX = e.clientX
-      lastClientY = e.clientY
-    }
-  }
+  if (!draggingId || !stage) return
+  const s = getSticker(draggingId)
+  if (!s) return
+  const rect = stage.getBoundingClientRect()
+  const px = clientX - lastClientX
+  const py = clientY - lastClientY
+  dragMovedSq += px * px + py * py
+  const dx = (px / rect.width) * 100
+  const dy = (py / rect.height) * 100
+  s.x = Math.max(0, Math.min(100, s.x + dx))
+  s.y = Math.max(0, Math.min(100, s.y + dy))
+  lastClientX = clientX
+  lastClientY = clientY
 }
 
-function onTouchMove(e: TouchEvent) {
+function onPointerMoveWindow(e: PointerEvent) {
   if (!draggingId) return
-  e.preventDefault()
-  const t = e.touches[0]
-  const stage = stageRef.value
-  if (!t || !stage) return
-  if (draggingId) {
-    const s = getSticker(draggingId)
-    if (s) {
-      const rect = stage.getBoundingClientRect()
-      const dx = ((t.clientX - lastClientX) / rect.width) * 100
-      const dy = ((t.clientY - lastClientY) / rect.height) * 100
-      s.x = Math.max(0, Math.min(100, s.x + dx))
-      s.y = Math.max(0, Math.min(100, s.y + dy))
-      lastClientX = t.clientX
-      lastClientY = t.clientY
-    }
-  }
+  applyDragDelta(e.clientX, e.clientY)
 }
+
+const CLICK_MOVE_THRESHOLD_SQ = CLICK_MOVE_THRESHOLD_PX * CLICK_MOVE_THRESHOLD_PX
 
 function onPointerUp() {
+  const id = draggingId
+  const movedSq = dragMovedSq
   draggingId = null
+  dragMovedSq = 0
+  if (id && movedSq < CLICK_MOVE_THRESHOLD_SQ) {
+    handleStickerTap(id)
+  }
 }
 
 /** 雙擊 weapon1~6：原為進「選版型」，已改為進「選角色」；若還原請取消下方註解並改回 showScreen('template') */
@@ -160,7 +268,7 @@ function onStickerDoubleClick(id: string) {
   }
 }
 
-function onStickerClick(e: MouseEvent, id: string) {
+function handleStickerTap(id: string) {
   const now = Date.now()
   if (lastClickId === id && now - lastClickTime <= DBL_CLICK_MS) {
     lastClickId = null
@@ -175,25 +283,24 @@ function onStickerClick(e: MouseEvent, id: string) {
 watch(
   () => currentScreen.value === 'found-game',
   (isActive) => {
-    if (isActive) initStickers()
+    if (isActive) {
+      initStickers()
+      void preloadWeaponHitCanvases()
+    }
   },
   { immediate: true }
 )
 
 onMounted(() => {
-  window.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('mouseup', onPointerUp)
-  window.addEventListener('touchmove', onTouchMove, { passive: false })
-  window.addEventListener('touchend', onPointerUp)
-  window.addEventListener('touchcancel', onPointerUp)
+  window.addEventListener('pointermove', onPointerMoveWindow)
+  window.addEventListener('pointerup', onPointerUp)
+  window.addEventListener('pointercancel', onPointerUp)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('mousemove', onMouseMove)
-  window.removeEventListener('mouseup', onPointerUp)
-  window.removeEventListener('touchmove', onTouchMove)
-  window.removeEventListener('touchend', onPointerUp)
-  window.removeEventListener('touchcancel', onPointerUp)
+  window.removeEventListener('pointermove', onPointerMoveWindow)
+  window.removeEventListener('pointerup', onPointerUp)
+  window.removeEventListener('pointercancel', onPointerUp)
 })
 </script>
 
@@ -207,7 +314,11 @@ onUnmounted(() => {
         draggable="false"
       />
       <div class="found-game__layer">
-        <div ref="stageRef" class="found-game__stage">
+        <div
+          ref="stageRef"
+          class="found-game__stage"
+          @pointerdown="onStagePointerDown"
+        >
           <div
             v-for="s in visibleStickers"
             :key="s.id"
@@ -221,9 +332,6 @@ onUnmounted(() => {
               top: `${s.y}%`,
               transform: `translate(-50%, -50%) rotate(${s.rotation}deg)`,
             }"
-            @click="onStickerClick($event, s.id)"
-            @mousedown="onStickerMouseDown($event, s.id)"
-            @touchstart="onStickerTouchStart($event, s.id)"
           >
             <img
               :src="`${WEAPON_BASE}/weapon${s.weaponNum}.png`"
@@ -252,8 +360,6 @@ onUnmounted(() => {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  /* 圖片較矮時捲動區外不露出 #app 淺灰 */
-  background-color: #0d0d0d;
 }
 
 /* 背景圖自適應寬度、高度依比例；內容高於視窗時由 .screen--found-game 出現捲軸 */
@@ -293,6 +399,7 @@ onUnmounted(() => {
   height: 100%;
   min-height: 100%;
   overflow: visible;
+  touch-action: none;
 }
 
 .found-game__header {
@@ -327,13 +434,14 @@ onUnmounted(() => {
   height: 548px;
   margin-left: -150px;
   margin-top: -274px;
-  cursor: grab;
+  cursor: inherit;
   z-index: 1;
   touch-action: none;
   user-select: none;
+  pointer-events: none;
 
   &:active {
-    cursor: grabbing;
+    cursor: inherit;
   }
 
   /* weapon1~6 較小，圖層在 weapon7 之下 */

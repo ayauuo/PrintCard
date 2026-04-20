@@ -193,13 +193,13 @@ onUnmounted(() => {
 <template>
   <div
     class="secret-hotspot"
-    @click="onHotspotClick"
+    @click.stop="onHotspotClick"
     @pointerdown="onHotspotPointerDown"
     @pointerup="onHotspotPointerUp"
     @pointerleave="onHotspotPointerLeave"
     @pointercancel="onHotspotPointerCancel"
   />
-  <div v-if="open" class="secret-overlay" role="dialog" aria-label="管理登入">
+  <div v-if="open" class="secret-overlay" role="dialog" aria-label="管理登入" @click.stop>
     <!-- 密碼鍵盤 -->
     <div v-if="showKeypad" class="secret-keypad">
       <div class="secret-title">請輸入密碼</div>
@@ -259,6 +259,8 @@ onUnmounted(() => {
   z-index: 2147483647;
   background: transparent;
   opacity: 1;
+  /* 父層待機 .idle__layer 為 pointer-events:none，需明確開啟才能點熱點 */
+  pointer-events: auto;
 }
 
 .secret-overlay {
@@ -269,6 +271,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   z-index: 2147483647;
+  pointer-events: auto;
 }
 
 .secret-keypad,

@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { usePhotobooth } from '@/composables/usePhotobooth'
 import ScreenIdle from '@/components/photobooth/ScreenIdle.vue'
+import ScreenCustomerUploadQr from '@/components/photobooth/ScreenCustomerUploadQr.vue'
 import ScreenMemoryGame from '@/components/photobooth/ScreenMemoryGame.vue'
 import ScreenFoundGame from '@/components/photobooth/ScreenFoundGame.vue'
 import ScreenChooseCharacter from '@/components/photobooth/ScreenChooseCharacter.vue'
@@ -57,6 +58,12 @@ const isChooseCharacterEnabled = () => {
   return v !== '0' && String(v ?? '1').toLowerCase() !== 'false'
 }
 
+/** 顧客先掃 QR 上傳照片再選版型（來自 .env） */
+const isCustomerUploadFlowEnabled = () => {
+  const v = import.meta.env.VITE_CUSTOMER_UPLOAD_FLOW
+  return v === '1' || String(v ?? '').toLowerCase() === 'true'
+}
+
 /** 已付金額累積：紙鈔只收 100 元；投幣器被動、可累積超過 100（例如 200），滿 100 扣一次進選版型，回到待機後餘額若仍 >= 100 再進選版型一次 */
 const paidAccumulated = ref(0)
 
@@ -87,6 +94,10 @@ async function runScheduledUploadWhenIdle() {
 }
 
 function goToNextScreen() {
+  if (isCustomerUploadFlowEnabled()) {
+    showScreen('customer-upload-qr')
+    return
+  }
   if (isFoundGameEnabled()) {
     showScreen('found-game')
   } else if (isMemoryGameEnabled()) {
@@ -240,6 +251,7 @@ onUnmounted(() => {
       :is-payments-enabled="isPaymentsEnabled()"
       @click-to-start="goToNextScreen"
     />
+    <ScreenCustomerUploadQr :class="{ active: currentScreen === 'customer-upload-qr' }" />
     <TestFilterPage
       v-if="currentScreen === 'test-filter'"
       :class="{ active: currentScreen === 'test-filter' }"

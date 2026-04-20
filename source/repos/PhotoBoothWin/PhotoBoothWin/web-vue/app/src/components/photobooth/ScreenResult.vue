@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, onBeforeUnmount } from 'vue'
 import { usePhotobooth } from '@/composables/usePhotobooth'
 
 const {
@@ -15,7 +15,7 @@ const {
   resetSession,
   autoPrint,
   isTestSession,
-  immediatePrintAfterNextResult,
+  goToPrintingThenIdle,
 } = usePhotobooth()
 
 const copies = ref(1)
@@ -81,77 +81,17 @@ function clearAutoGoTimer() {
   }
 }
 
-/** 進入列印中 → 送 DNP（若未設 VITE_SKIP_PRINT）→ 寫入列印紀錄 CSV → 顯示 N 秒後回待機並還原 */
-function goToPrintingThenIdle() {
-  const printingSec = getPrintingShowSec()
-  const skipPrint = getSkipPrint()
-  showScreen('processing')
-  if (!finalFilePath.value) {
-    setTimeout(() => { autoPrint.value = false; resetSession(); showScreen('idle') }, printingSec * 1000)
-    return
-  }
-  if (skipPrint) {
-    if (getLogPrintRecordWhenSkip()) {
-      callHost('log_print_record', {
-        templateName: selectedTemplate.value?.id ?? 'unknown',
-        printTime: new Date().toISOString(),
-        amount: getReceiptAmount(),
-        projectName: getProjectName(),
-        machineName: getMachineName(),
-        copies: 1,
-        fileName: getFinalFileName(),
-        isTest: getIsTest(),
-      }).finally(() => {
-        setTimeout(() => { autoPrint.value = false; resetSession(); showScreen('idle') }, printingSec * 1000)
-      })
-    } else {
-      setTimeout(() => { autoPrint.value = false; resetSession(); showScreen('idle') }, printingSec * 1000)
-    }
-    return
-  }
-  callHost('print_hotfolder', {
-    filePath: finalFilePath.value,
-    sizeKey: selectedTemplate.value?.sizeKey ?? '4x6',
-    copies: 1,
-  })
-    .then(() =>
-      callHost('log_print_record', {
-        templateName: selectedTemplate.value?.id ?? 'unknown',
-        printTime: new Date().toISOString(),
-        amount: getReceiptAmount(),
-        projectName: getProjectName(),
-        machineName: getMachineName(),
-        copies: copies.value,
-        fileName: getFinalFileName(),
-        isTest: getIsTest(),
-      })
-    )
-    .finally(() => {
-      setTimeout(() => {
-        autoPrint.value = false
-        resetSession()
-        showScreen('idle')
-      }, printingSec * 1000)
-    })
-}
-
 // 結果頁：有合成結果時啟動 N 秒（ENV）自動列印，沒按就自動進列印中（需 VITE_SKIP_PRINT=0 才會真的送 DNP）
+// 選角立即列印在 buildFinalOutput 內直接 goToPrintingThenIdle，不經結果頁
 watch(
-  [() => currentScreen.value, () => finalFilePath.value, () => immediatePrintAfterNextResult.value],
+  [() => currentScreen.value, () => finalFilePath.value],
   ([screen, path]) => {
     clearAutoGoTimer()
     if (screen !== 'result' || !path) return
-    if (immediatePrintAfterNextResult.value) {
-      immediatePrintAfterNextResult.value = false
-      void nextTick(() => {
-        goToPrintingThenIdle()
-      })
-      return
-    }
     const sec = getResultAutoPrintSec()
     autoGoTimer.value = setTimeout(() => {
       autoGoTimer.value = null
-      goToPrintingThenIdle()
+      goToPrintingThenIdle(copies.value)
     }, sec * 1000)
   },
   { immediate: true }
